@@ -20,12 +20,6 @@ public class Client {
 
         String fileName = path.substring(path.lastIndexOf("/") + 1);
 
-//        System.out.println(path);
-//        System.out.println(fileName);
-//        System.out.println("File size = " + file.getChannel().size());
-//        System.out.println(stringAddress);
-//        System.out.println(port);
-
         InetSocketAddress address = new InetSocketAddress(stringAddress, port);
         clientChannel = SocketChannel.open(address);
 
@@ -40,21 +34,34 @@ public class Client {
 
         ByteBuffer buffer = ByteBuffer.wrap(firstMsg.toByteArray());
         clientChannel.write(buffer);
-        buffer.clear();
-//        while (true){
-//
-//            // wait for 2 seconds before sending next message
-//            Thread.sleep(2000);
-//        }
+        //--------------------------------
+
+        // receive answer
+        buffer = ByteBuffer.allocate(3);
+        clientChannel.read(buffer);
+
+        String answer = new String(buffer.array());
+        System.out.println(answer);
+        if ( answer.equals("OK!") ) {
+            sendFile(file);
+        }
+        else {
+            System.out.println("Не удалось подключиться к серверу!");
+            clientChannel.close();
+        }
 
         clientChannel.close();
 
     }
 
-    private static void sendMessage(String msg) throws IOException {
-        byte[] message = msg.getBytes();
-        ByteBuffer buffer = ByteBuffer.wrap(message);
-        clientChannel.write(buffer);
-        buffer.clear();
+    private static void sendFile(FileInputStream file) throws IOException {
+        byte[] filePart = new byte[1024];
+        int num;
+        while ( (num = file.read(filePart, 0, filePart.length)) != -1) {
+            ByteBuffer buffer = ByteBuffer.allocate(num);
+            buffer.put(filePart, 0, num);
+            buffer.flip();
+            clientChannel.write(buffer);
+        }
     }
 }
