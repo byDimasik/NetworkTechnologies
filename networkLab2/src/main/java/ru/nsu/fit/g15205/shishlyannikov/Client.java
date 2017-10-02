@@ -26,6 +26,7 @@ public class Client {
         // Send size of file and file name
         long fileSize = file.getChannel().size();
 
+        // TODO переделать на ByteBuffer
         ByteArrayOutputStream firstMsg = new ByteArrayOutputStream();
         DataOutputStream dataOutputStream = new DataOutputStream(firstMsg);
 

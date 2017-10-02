@@ -27,7 +27,6 @@ public class Server {
 
         Selector selector = Selector.open(); // selector is open here
 
-        // ServerSocketChannel: selectable channel for stream-oriented listening sockets
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
         InetSocketAddress address = new InetSocketAddress("localhost", port);
 
@@ -40,7 +39,6 @@ public class Server {
         Files.createDirectories(path);
         while (true) {
 
-            // Selects a set of keys whose corresponding channels are ready for I/O operations
             int selectNum = selector.select();
 
             // если нет активности - ждем
@@ -49,14 +47,14 @@ public class Server {
             }
 
 
-            // token representing the registration of a SelectableChannel with a Selector
             Set<SelectionKey> cleintsKeys = selector.selectedKeys();
             Iterator<SelectionKey> iterator = cleintsKeys.iterator();
 
             while (iterator.hasNext()) {
                 SelectionKey key = iterator.next();
 
-                // Tests whether this key's channel is ready to accept a new socket connection
+                //TODO attachment
+                //TODO !key.isValid()
                 if (key.isAcceptable()) {
                     SocketChannel clientChannel = serverSocketChannel.accept();
 
@@ -65,7 +63,7 @@ public class Server {
                     System.out.println("Connection Accepted: " + clientChannel.getLocalAddress() + "\n");
                 } else if (key.isReadable()) {
                     SocketChannel clientChannel = (SocketChannel) key.channel();
-                    String clientName = clientChannel.toString();
+                    String clientName = clientChannel.toString(); // TODO переделать на айпи и порт
 
                     if (clients.containsKey(clientName)) {
                         ByteBuffer buffer = ByteBuffer.allocate(1024);
