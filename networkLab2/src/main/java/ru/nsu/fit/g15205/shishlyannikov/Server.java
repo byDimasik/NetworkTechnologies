@@ -2,6 +2,7 @@ package ru.nsu.fit.g15205.shishlyannikov;
 
 import java.io.*;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -15,7 +16,6 @@ import sun.misc.SignalHandler;
 
 
 public class Server {
-    private static String OS = System.getProperty("os.name").toLowerCase();
     private static boolean WORK = true;
     private static final Object changeWorkState = new Object();
 
@@ -36,6 +36,7 @@ public class Server {
             System.err.println("Надо было порт аргументом передать!");
             System.exit(1);
         }
+
         SignalHandler signalHandler = new SignalHandler() {
             @Override
             public void handle(Signal sig) {
@@ -58,13 +59,14 @@ public class Server {
             serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
 
             Files.createDirectories(Paths.get(dir));
-
+            long num;
             while (true) {
                 synchronized (changeWorkState) {
                     if (!WORK) {        // это может произойти только если серверу пришел SIGINT
                         break;
                     }
                 }
+
                 currentTime = (System.currentTimeMillis() - localTime); // считаем время для расчета мгновенной скорости
                 globalTime = System.currentTimeMillis();                // для расчета глобальное скорости
                 int selectNum = selector.select(300);           // ждем, пока на каналах появятся данные
@@ -95,34 +97,43 @@ public class Server {
                             ClientConnection clientConnection = (ClientConnection) key.attachment();
 
                             ByteBuffer buffer = ByteBuffer.allocate(1024);
-                            long num = clientChannel.read(buffer);
+                            try {
+                                num = clientChannel.read(buffer);
+                            } catch (IOException ex) {
+                                num = -1;
+                            }
+                            if (num == -1) {
+                                // клиент помер, удаляем его файл
+                                System.out.println("Receive from " + clientChannel.getRemoteAddress() + " failed");
+                                clientConnection.getFile().close();
+                                Files.delete(clientConnection.getPathToFile());
+                                clientChannel.close();
+                                key.cancel();
+                                iterator.remove();
+                                continue;
+                            }
+
                             buffer.flip();
 
-                            if (num != -1) {
-                                // если что-то пришло, пишем это в файл
-                                clientConnection.getFile().write(buffer.array(), 0, (int)num);
-                                clientConnection.updateReceived(num);
-                                if (currentTime > TIME_TO_SPEED) {
-                                    // пришло время вывести скорости
-                                    String speedMsg =
-                                            clientChannel.getRemoteAddress() + ":" +
-                                            "   Moment speed: " + clientConnection.resetReceived() / (currentTime / 1000) + " B/s" +
-                                            "   Average speed: " + clientConnection.getRecorded() / ((globalTime - startTime) / 1000) + " B/s";
-                                    System.out.println(speedMsg);
-                                }
+                            clientConnection.getFile().write(buffer.array(), 0, (int) num);
+                            clientConnection.updateReceived(num);
+
+                            if (currentTime > TIME_TO_SPEED) {
+                                // пришло время вывести скорости
+                                String speedMsg =
+                                        clientChannel.getRemoteAddress() + ":" +
+                                                "   Moment speed: " + clientConnection.resetReceived() / (currentTime / 1000) + " B/s" +
+                                                "   Average speed: " + clientConnection.getRecorded() / ((globalTime - startTime) / 1000) + " B/s";
+                                System.out.println(speedMsg);
                             }
-                            if ( num != 1024) {
+
+                            if (clientConnection.fileFull()) {
                                 // если пришло меньше килобайта, занчит пакет последний, заканчиваем работу
                                 clientConnection.getFile().close();
-                                if (!clientConnection.fileFull()) {
-                                    // если файл записан не полностью, значит клиент помер, удаляем его файл
-                                    System.out.println("Receive from " + clientChannel.getRemoteAddress() + " failed");
-                                    Files.delete(clientConnection.getPathToFile());
-                                }
-                                else {
-                                    System.out.println("File from " + clientChannel.getRemoteAddress() + " received\n");
-                                    clientChannel.write(ByteBuffer.wrap("FR!".getBytes()));
-                                }
+
+                                System.out.println("File from " + clientChannel.getRemoteAddress() + " received\n");
+                                clientChannel.write(ByteBuffer.wrap("FR!".getBytes()));
+
                                 clientChannel.close();
                                 key.cancel();
                             }
@@ -137,6 +148,9 @@ public class Server {
                             byte[] byteFileName = new byte[lenFileName];
                             buffer.get(byteFileName);
                             String fileName = new String(byteFileName);     // само имя
+                            if (fileName.contains("\\"))
+                                fileName = fileName.substring(fileName.lastIndexOf("\\") + 1);
+
                             String path = dir + "/" + fileName;             // путь на сервере
 
                             if (fileExist(path)) {
@@ -172,6 +186,7 @@ public class Server {
                     }
                     iterator.remove();
                 }
+
                 if (currentTime > TIME_TO_SPEED) {
                     // если прошло три секунды, значит, мы уже вывели скорость, обнуляем счетчик
                     localTime = System.currentTimeMillis();
@@ -200,7 +215,7 @@ public class Server {
                 iterator.remove();
             }
             selector.close();
-        } catch (IOException ex) {
+        } catch (Exception ex) {
             System.err.println(ex.getLocalizedMessage());
         }
     }
@@ -211,26 +226,7 @@ public class Server {
     }
 
     public static long getFreeSpace() {
-        File checkFreeSpace;
-        long freeSpace = 0;
-        if (isWindows()) {
-            checkFreeSpace = new File("c:");
-            freeSpace = checkFreeSpace.getFreeSpace();
-        } else if (isUnix()) {
-            checkFreeSpace = new File("/");
-            freeSpace = checkFreeSpace.getFreeSpace();
-        } else {
-            System.err.println("Unknown OS");
-            System.exit(1);
-        }
-        return freeSpace;
-    }
-
-    public static boolean isWindows() {
-        return OS.contains("win");
-    }
-
-    public static boolean isUnix() {
-        return OS.contains("nix") || OS.contains("nux") || OS.contains("aix") || OS.contains("mac");
+        File checkFreeSpace = new File("uploads");
+        return checkFreeSpace.getFreeSpace();
     }
 }

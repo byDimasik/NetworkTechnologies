@@ -27,14 +27,13 @@ public class Client {
         try {
             FileInputStream file = new FileInputStream(path);
 
-            String fileName = path.substring(path.lastIndexOf("/") + 1);
+            String fileName = path.substring(path.lastIndexOf("\\") + 1);
 
             InetSocketAddress address = new InetSocketAddress(stringAddress, port);
             clientChannel = SocketChannel.open(address);
 
             // Send size of file and file name
             long fileSize = file.getChannel().size();
-
 
             ByteBuffer buffer = ByteBuffer.allocate(FIRST_MSG_SIZE);
             buffer.putLong(fileSize);
@@ -45,10 +44,14 @@ public class Client {
             clientChannel.write(buffer);
             //--------------------------------
 
+            int num;
             boolean WORK = true;
             while (WORK) {
                 buffer = ByteBuffer.allocate(3);
-                clientChannel.read(buffer);
+                num = clientChannel.read(buffer);
+                if (num != 3) {
+                    continue;
+                }
 
                 String answer = new String(buffer.array());
                 switch (answer) {
