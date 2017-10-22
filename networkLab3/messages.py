@@ -1,13 +1,6 @@
 import uuid
 
 
-MSG_TYPE_USER_MESSAGE = 1
-MSG_TYPE_ACK = 2
-MSG_TYPE_CHANGE_PARENT = 3
-MSG_TYPE_DEATH_NODE = 4
-MSG_TYPE_CONNECT = 5
-
-
 class Message:
     def __init__(self):
         self.message_uuid = uuid.uuid4().bytes
@@ -58,6 +51,9 @@ class ChangeParentMessage(Message):
             raise ValueError('Необходимо передать адрес нового родителя (IP, port)')
 
         self.parent_address = parent_address
+
+    def get_parent_address(self):
+        return self.parent_address
 
 
 class AckMessage(Message):

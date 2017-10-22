@@ -31,12 +31,11 @@ if __name__ == "__main__":
 
     parent_address = None
     parent_port = None
-    # FIXME проверка говно
-    if arguments.parent_address:
+    if arguments.parent_address or arguments.parent_port:
         parent_address = arguments.parent_address
         parent_port = arguments.parent_port
         ROOT = False
-        if not parent_port:
+        if not (parent_address or parent_port):
             print("Если передавать адрес родителя, то нужно передавать и адрес, и порт,"
                   " либо вообще ничего не передавать!!!")
             exit(1)

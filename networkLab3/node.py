@@ -4,8 +4,15 @@ import socket
 import pickle
 import time
 import random
+import signal
 
 import messages
+
+WORK = threading.Event()
+
+
+def signal_handler(signal, frame):
+    WORK.clear()
 
 
 class CyclicList:
@@ -29,6 +36,10 @@ class CyclicList:
 
 class Node:
     def __init__(self, nickname, port, lost, parent_address=None):
+        WORK.set()
+
+        signal.signal(signal.SIGINT, signal_handler)
+
         self.node_addresses = []
         self.node_addresses_cond = threading.Condition()
         self.messages_queue = queue.Queue()
@@ -43,7 +54,6 @@ class Node:
         self.nickname = nickname
         self.port = port
         self.lost = lost
-        print(self.lost)
         if not (nickname or port or lost):
             raise ValueError('Nickname or port or lost == None')
 
@@ -56,9 +66,10 @@ class Node:
         self.node_socket = socket.socket(type=socket.SOCK_DGRAM)
         self.node_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.node_socket.bind(('', self.port))
+        self.node_socket.settimeout(1)
         self.node_socket_cond = threading.Condition()
 
-        self.user_thread = threading.Thread(target=self.get_msg_from_user, args=())
+        self.user_thread = threading.Thread(target=self.get_msg_from_user, args=(), daemon=True)
         self.sender_thread = threading.Thread(target=self.sender_routine, args=())
         self.receiver_thread = threading.Thread(target=self.receiver_routine, args=())
         self.checker_thread = threading.Thread(target=self.checker_routine, args=())
@@ -71,12 +82,23 @@ class Node:
     def add_address(self, address):
         try:
             self.node_addresses_cond.acquire()
-            self.node_addresses.append(address)
+            if self.node_addresses.count(address) == 0:
+                self.node_addresses.append(address)
+        finally:
+            self.node_addresses_cond.release()
+
+    def remove_address(self, address):
+        try:
+            self.node_addresses_cond.acquire()
+            try:
+                self.node_addresses.remove(address)
+            except ValueError:
+                pass
         finally:
             self.node_addresses_cond.release()
 
     def checker_routine(self):
-        while True:
+        while WORK.is_set() or len(self.activities) or self.receiver_thread.is_alive():
             time.sleep(0.5)
             now_time = time.time()
 
@@ -95,8 +117,14 @@ class Node:
             try:
                 self.node_addresses_cond.acquire()
                 for address in dead_nodes:
+                    if address == self.parent_address:
+                        print('Parent node dead. I\'m root')
+                        self.parent_address = None
                     print("Connection lost:", address)
-                    self.node_addresses.remove(address)
+                    try:
+                        self.node_addresses.remove(address)
+                    except ValueError:
+                        pass
             finally:
                 self.node_addresses_cond.release()
 
@@ -115,10 +143,14 @@ class Node:
                     self.sync_sendto(message, message.get_destination())
             finally:
                 self.sent_messages_cond.release()
+        print('checker off')
 
     def receiver_routine(self):
-        while True:
-            data, address = self.node_socket.recvfrom(128000)
+        while WORK.is_set() or len(self.activities) or self.sender_thread.is_alive():
+            try:
+                data, address = self.node_socket.recvfrom(128000)
+            except socket.timeout:
+                continue
 
             if data:
                 if random.randint(0, 99) < self.lost:
@@ -152,6 +184,7 @@ class Node:
                             self.sent_messages.pop(remove_index)
                     finally:
                         self.sent_messages_cond.release()
+
                     continue
 
                 self.send_ack(message.get_uuid(), address)
@@ -167,20 +200,33 @@ class Node:
                     message.set_sender(address)
                     self.messages_queue.put(message)
 
+                elif type(message) == messages.DeathMessage:
+                    print('Connection cancelled:', address)
+                    if address == self.parent_address:
+                        print('I\'m root')
+                        self.parent_address = None
+                    self.remove_address(address)
+
+                elif type(message) == messages.ChangeParentMessage:
+                    self.remove_address(self.parent_address)
+                    print('Change parent to', message.get_parent_address())
+                    self.parent_address = message.get_parent_address()
+                    self.add_address(self.parent_address)
+                    self.send_connect()
+        print('receiver off')
+
     def sender_routine(self):
-        while True:
-            message = self.messages_queue.get(block=True)
+        while WORK.is_set():
+            try:
+                message = self.messages_queue.get(timeout=1)
+            except queue.Empty:
+                continue
 
             if type(message) == messages.AckMessage:
                 self.sync_sendto(message, message.get_destination())
 
             elif type(message) == messages.ConnectMessage:
-                self.sync_sendto(message, self.parent_address)
-                self.sync_add_activities(self.parent_address)
-
-                message.set_destination(self.parent_address)
-
-                self.sync_add_sent_message(message)
+                self.sync_send_with_add_activities(message, self.parent_address)
 
             elif type(message) == messages.UserMessage:
                 try:
@@ -189,18 +235,35 @@ class Node:
                         if message.get_sender() == node_address:
                             continue
 
-                        self.sync_sendto(message, node_address)
-                        self.sync_add_activities(node_address)
-
-                        message.set_destination(node_address)
-
-                        self.sync_add_sent_message(message)
+                        self.sync_send_with_add_activities(message, node_address)
 
                         sender = message.get_sender()
                         message = messages.UserMessage(message.get_nickname(), message.get_text())
                         message.set_sender(sender)
                 finally:
                     self.node_addresses_cond.release()
+
+        try:
+            self.node_addresses_cond.acquire()
+
+            if not self.parent_address:
+                if len(self.node_addresses):
+                    self.parent_address = self.node_addresses[0]
+
+            if self.parent_address:
+                message = messages.DeathMessage()
+                self.sync_send_with_add_activities(message, self.parent_address)
+
+                for node_address in self.node_addresses:
+                    if node_address == self.parent_address:
+                        continue
+
+                    message = messages.ChangeParentMessage(self.parent_address)
+                    self.sync_send_with_add_activities(message, node_address)
+        finally:
+            self.node_addresses_cond.release()
+
+        print('sender off')
 
     def send_connect(self):
         message = messages.ConnectMessage()
@@ -211,11 +274,20 @@ class Node:
         self.messages_queue.put(message)
 
     def get_msg_from_user(self):
-        while True:
+        while WORK.is_set():
             message = input()
 
+            time.sleep(1)
             message = messages.UserMessage(self.nickname, message)
             self.messages_queue.put(message)
+
+    def sync_send_with_add_activities(self, message, address):
+        self.sync_sendto(message, address)
+        self.sync_add_activities(address)
+
+        message.set_destination(address)
+
+        self.sync_add_sent_message(message)
 
     def sync_sendto(self, message, address):
         try:
