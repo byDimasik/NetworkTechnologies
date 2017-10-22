@@ -9,22 +9,18 @@ MSG_TYPE_CONNECT = 5
 
 
 class Message:
-    port = None
-    sender_address = None
-    message_uuid = None
-
     def __init__(self, port):
         self.message_uuid = uuid.uuid4().bytes
         self.port = port
+        self.senders = []
 
-    def set_sender_address(self, ip):
-        self.sender_address = (ip, self.port)
+    def add_sender(self, ip, port=None):
+        if not port:
+            port = self.port
+        self.senders.append((ip, port))
 
 
 class UserMessage(Message):
-    nickname = None
-    text = None
-
     def __init__(self, port, nickname, text):
         Message.__init__(self, port)
 
@@ -42,8 +38,6 @@ class UserMessage(Message):
 
 
 class ChangeParentMessage(Message):
-    parent_address = None
-
     def __init__(self, port, parent_address):
         Message.__init__(self, port)
 

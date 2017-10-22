@@ -5,25 +5,27 @@ import pickle
 
 import messages
 
-"""
-Три потока: первый ждет ввода сообщений и пихает их в очередь
-            второй отправляет из очереди и ждет подтверждения доставки
-            третий принимает сообщения от других
-"""
+
+class CyclicList:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.c_list = []
+        self.position = 0
+
+    def append(self, item):
+        self.c_list.insert(self.position, item)
+        self.position = (self.position + 1) % self.capacity
+
+    def contains(self, item):
+        return self.c_list.count(item) > 0
 
 
 class Node:
-    nickname = None
-    parent_address = None
-    node_addresses = []
-    node_addresses_cond = threading.Condition()
-    messages_queue = queue.Queue()
-    user_thread = None
-    sender_thread = None
-    receiver_thread = None
-    port = None
-
     def __init__(self, nickname, port, parent_address=None):
+        self.node_addresses = []
+        self.node_addresses_cond = threading.Condition()
+        self.messages_queue = queue.Queue()
+
         self.nickname = nickname
         self.port = port
         if not (nickname or port):
@@ -59,14 +61,15 @@ class Node:
 
             if data:
                 message = pickle.loads(data)
-                message.set_sender_address(address[0])
+                message.add_sender(address[0])
 
                 if type(message) == messages.ConnectMessage:
-                    print('Connect new node', message.sender_address)
-                    self.add_address(message.sender_address)
+                    print('Connect new node', address)
+                    self.add_address((address[0], message.port))
 
                 elif type(message) == messages.UserMessage:
-                    print(message.get_nickname()+ ':', message.get_text())
+                    print(message.get_nickname() + ':', message.get_text())
+                    message.add_sender(address[0], self.port)
                     self.messages_queue.put(message)
 
     def sender_routine(self):
@@ -78,7 +81,7 @@ class Node:
             try:
                 self.node_addresses_cond.acquire()
                 for node_address in self.node_addresses:
-                    if message.sender_address == node_address:
+                    if message.senders.count(node_address) > 0:
                         continue
 
                     send_socket.sendto(pickle.dumps(message), node_address)
@@ -95,5 +98,3 @@ class Node:
 
             message = messages.UserMessage(self.port, self.nickname, message)
             self.messages_queue.put(message)
-
-            # print(message)
