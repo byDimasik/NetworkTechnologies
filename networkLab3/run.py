@@ -28,6 +28,9 @@ if __name__ == "__main__":
     if lost < 0 or lost > 100:
         print("Значение процента потерь должно быть от 0 до 100!!!")
         exit(1)
+    if len(nickname) > 20:
+        print("Никнейм должен быть не длиннее 20 символов")
+        exit(1)
 
     parent_address = None
     parent_port = None

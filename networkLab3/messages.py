@@ -3,12 +3,9 @@ import uuid
 
 class Message:
     def __init__(self):
-        self.message_uuid = uuid.uuid4().bytes
-        self.sender_address = None
-        self.destination = None
-
-    def update_uuid(self):
-        self.message_uuid = uuid.uuid4().bytes
+        self.message_uuid = uuid.uuid4().bytes  # uuid сообщения
+        self.sender_address = None              # адрес отправителя
+        self.destination = None                 # адрес назначения
 
     def set_sender(self, address):
         self.sender_address = address
@@ -50,7 +47,7 @@ class ChangeParentMessage(Message):
         if not parent_address:
             raise ValueError('Необходимо передать адрес нового родителя (IP, port)')
 
-        self.parent_address = parent_address
+        self.parent_address = parent_address    # адрес нового родителя
 
     def get_parent_address(self):
         return self.parent_address
