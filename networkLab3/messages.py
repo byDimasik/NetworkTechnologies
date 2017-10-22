@@ -9,20 +9,33 @@ MSG_TYPE_CONNECT = 5
 
 
 class Message:
-    def __init__(self, port):
+    def __init__(self):
         self.message_uuid = uuid.uuid4().bytes
-        self.port = port
-        self.senders = []
+        self.sender_address = None
+        self.destination = None
 
-    def add_sender(self, ip, port=None):
-        if not port:
-            port = self.port
-        self.senders.append((ip, port))
+    def update_uuid(self):
+        self.message_uuid = uuid.uuid4().bytes
+
+    def set_sender(self, address):
+        self.sender_address = address
+
+    def set_destination(self, destination):
+        self.destination = destination
+
+    def get_sender(self):
+        return self.sender_address
+
+    def get_uuid(self):
+        return self.message_uuid
+
+    def get_destination(self):
+        return self.destination
 
 
 class UserMessage(Message):
-    def __init__(self, port, nickname, text):
-        Message.__init__(self, port)
+    def __init__(self, nickname, text):
+        Message.__init__(self)
 
         if not nickname:
             raise ValueError('Необоходимо передать nickname')
@@ -38,8 +51,8 @@ class UserMessage(Message):
 
 
 class ChangeParentMessage(Message):
-    def __init__(self, port, parent_address):
-        Message.__init__(self, port)
+    def __init__(self, parent_address):
+        Message.__init__(self)
 
         if not parent_address:
             raise ValueError('Необходимо передать адрес нового родителя (IP, port)')
@@ -48,15 +61,17 @@ class ChangeParentMessage(Message):
 
 
 class AckMessage(Message):
-    def __init__(self, port):
-        Message.__init__(self, port)
+    def __init__(self, message_uuid, destination):
+        Message.__init__(self)
+        self.destination = destination
+        self.message_uuid = message_uuid
 
 
 class DeathMessage(Message):
-    def __init__(self, port):
-        Message.__init__(self, port)
+    def __init__(self):
+        Message.__init__(self)
 
 
 class ConnectMessage(Message):
-    def __init__(self, port):
-        Message.__init__(self, port)
+    def __init__(self):
+        Message.__init__(self)

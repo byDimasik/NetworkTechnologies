@@ -44,8 +44,6 @@ if __name__ == "__main__":
     print(nickname, lost, port, parent_address, parent_port)
 
     if ROOT:
-        node = node.Node(nickname, port)
+        node = node.Node(nickname, port, lost)
     else:
-        node = node.Node(nickname, port, (parent_address, parent_port))
-
-
+        node = node.Node(nickname, port, lost, (parent_address, parent_port))
