@@ -1,20 +1,9 @@
-import uuid
 import queue
 import threading
-import struct
 import socket
 import pickle
 
-MSG_TYPE_USER_MESSAGE = 1
-MSG_TYPE_ACK = 2
-MSG_TYPE_CHANGE_PARENT = 3
-MSG_TYPE_DEATH_NODE = 4
-MSG_TYPE_CONNECT = 5
-
-
-def generate_uuid():
-    return uuid.uuid4()
-
+import messages
 
 """
 Три потока: первый ждет ввода сообщений и пихает их в очередь
@@ -23,54 +12,6 @@ def generate_uuid():
 """
 
 
-class Message:
-    sender_address = None
-    message_type = None
-    message_text = None
-    nickname = None
-    parent_address = None
-    port = None
-
-    def __init__(self, message_type, address=None, text=None, nickname=None, parent_address=None, port=None):
-        self.sender_address = address
-        self.message_type = message_type
-        self.port = port
-
-        if message_type == MSG_TYPE_USER_MESSAGE:
-            if not (text or nickname):
-                raise ValueError('Для типа user_message нужно передать nickname и text')
-
-            self.message_text = text.encode()
-            self.nickname = nickname.encode()
-
-        if message_type == MSG_TYPE_CHANGE_PARENT:
-            if not parent_address:
-                raise ValueError('Для типа change_parent нужно передать parent_address = (IP, port)')
-
-            self.parent_address = parent_address
-
-        if message_type == MSG_TYPE_CONNECT:
-            if not port:
-                raise ValueError('Для типа connect нужно передать порт')
-
-    def create_minimal_header(self, message_type):
-        return generate_uuid().bytes + struct.pack('b', message_type)
-
-    def build_message(self):
-        if self.message_type == MSG_TYPE_USER_MESSAGE:
-            return self.create_minimal_header(MSG_TYPE_USER_MESSAGE) + struct.pack('i', len(self.nickname)) + self.nickname + self.message_text
-        elif self.message_type == MSG_TYPE_ACK or self.message_type == MSG_TYPE_DEATH_NODE or self.message_type == MSG_TYPE_CONNECT:
-            return self.create_minimal_header(self.message_type)
-        elif self.message_type == MSG_TYPE_CHANGE_PARENT:
-            return self.create_minimal_header(MSG_TYPE_CHANGE_PARENT) + struct.pack('i', self.parent_address[1]) + self.parent_address[0]
-        else:
-            raise ValueError('Неизвестный тип сообщения')
-
-    def is_connect(self):
-        return self.message_type == MSG_TYPE_CONNECT
-
-
-# FIXME отправка самому себе. Порт отправки и прослушки не равны
 class Node:
     nickname = None
     parent_address = None
@@ -90,7 +31,7 @@ class Node:
 
         self.parent_address = parent_address
         if parent_address:
-            self.add_address(parent_address)
+            self.add_address((socket.gethostbyname(parent_address[0]), parent_address[1]))
             self.send_connect()
 
         self.user_thread = threading.Thread(target=self.get_msg_from_user, args=())
@@ -102,7 +43,6 @@ class Node:
         self.receiver_thread.start()
 
     def add_address(self, address):
-        print(address)
         try:
             self.node_addresses_cond.acquire()
             self.node_addresses.append(address)
@@ -119,12 +59,14 @@ class Node:
 
             if data:
                 message = pickle.loads(data)
-                message.sender_address = (address[0], message.port)
-                if message.is_connect():
-                    self.add_address((address[0], message.port))
+                message.set_sender_address(address[0])
 
-                if message.message_type == MSG_TYPE_USER_MESSAGE:
-                    print(message.message_text.decode())
+                if type(message) == messages.ConnectMessage:
+                    print('Connect new node', message.sender_address)
+                    self.add_address(message.sender_address)
+
+                elif type(message) == messages.UserMessage:
+                    print(message.get_nickname()+ ':', message.get_text())
                     self.messages_queue.put(message)
 
     def sender_routine(self):
@@ -139,20 +81,19 @@ class Node:
                     if message.sender_address == node_address:
                         continue
 
-                    print('send to', node_address)
                     send_socket.sendto(pickle.dumps(message), node_address)
             finally:
                 self.node_addresses_cond.release()
 
     def send_connect(self):
-        message = Message(MSG_TYPE_CONNECT, port=self.port)
+        message = messages.ConnectMessage(self.port)
         self.messages_queue.put(message)
 
     def get_msg_from_user(self):
         while True:
             message = input()
 
-            message = Message(MSG_TYPE_USER_MESSAGE, text=message, nickname=self.nickname, port=self.port)
+            message = messages.UserMessage(self.port, self.nickname, message)
             self.messages_queue.put(message)
 
             # print(message)
