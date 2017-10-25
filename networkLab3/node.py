@@ -189,6 +189,8 @@ class Node:
                 data, address = self.node_socket.recvfrom(MAX_MSG_SIZE)
             except socket.timeout:
                 continue
+            except ConnectionResetError:
+                continue
 
             if data:
                 if random.randint(0, 99) < self.lost:
@@ -349,7 +351,11 @@ class Node:
         Этот поток умирает, когда умрут все остальные, потому что он демон
         """
         while WORK.is_set():
-            message = input()
+            try:
+                message = input()
+            except KeyboardInterrupt:
+                WORK.clear()
+                continue
 
             if message == "kill me please":
                 # альтернативный вариант завершения работы узла
