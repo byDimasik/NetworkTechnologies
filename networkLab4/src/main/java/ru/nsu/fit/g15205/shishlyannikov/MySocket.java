@@ -3,29 +3,31 @@ package ru.nsu.fit.g15205.shishlyannikov;
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 
 public class MySocket {
-    private final short SYN_FLAG = 1;
-    private final short ACK_FLAG = 2;
-    private final short FIN_FLAG = 4;
-    private final short RST_FLAG = 8;
+    private final byte SYN_FLAG = 1;
+    private final byte ACK_FLAG = 2;
+    private final byte FIN_FLAG = 4;
+    private final byte RST_FLAG = 8;
 
-    private final short HEADER_SIZE = 20;
+    private final short HEADER_SIZE = 9;
 
-    private DatagramSocket datagramSocket;
+    private DatagramSocket datagramSocket = null;
+    private ArrayList<DatagramPacket> inPackets = new ArrayList<>();
+    private ArrayList<DatagramPacket> outPackets = new ArrayList<>();
+
     private int sequenceNum = 1;
-    private int sourcePort;
     private int destinationPort;
+
     private InetAddress destinationAddress;
 
+    public MySocket() {}
 
-    // TODO спросить как сделать так, чтобы один и тот же класс MySocket был и для клиента и для сервера
-    // TODO потому что на сервере нельзя больше одного UDP сокета, а на клиенте у каждого MySocket свой DatagramSocket
     public MySocket(String host, int port) throws SocketException {
         datagramSocket = new DatagramSocket();
         datagramSocket.setSoTimeout(10000);
 
-        this.sourcePort = datagramSocket.getLocalPort();
         this.destinationPort = port;
 
         try {
@@ -45,11 +47,9 @@ public class MySocket {
         while (true) {
             ByteBuffer data = ByteBuffer.allocate(HEADER_SIZE);
 
-            data.putInt(sourcePort);
-            data.putInt(destinationPort);
             data.putInt(sequenceNum++);
             data.putInt(0);
-            data.putInt(SYN_FLAG);
+            data.put(SYN_FLAG);
             data.flip();
 
             DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
@@ -70,16 +70,10 @@ public class MySocket {
                 ex.printStackTrace();
             }
 
-            if (data.getInt() != destinationPort) {
-                // получили пакет не от того, от кого ждали
-                continue;
-            }
-            data.getInt();  // пропускаем поле, в котором хранится наш порт
-
             int serverSeq = data.getInt();
             int ack = data.getInt();
+            byte flags = data.get();
 
-            int flags = data.getInt();
             if ((flags & SYN_FLAG) == SYN_FLAG) {
                 if (((flags & ACK_FLAG) == ACK_FLAG) && (ack == sequenceNum)) {
                     sendAck(++serverSeq);
@@ -104,11 +98,9 @@ public class MySocket {
     private void sendAck(int ackNum) {
         ByteBuffer data = ByteBuffer.allocate(20);
 
-        data.putInt(sourcePort);
-        data.putInt(destinationPort);
         data.putInt(sequenceNum++);
         data.putInt(ackNum);
-        data.putInt(ACK_FLAG);
+        data.put(ACK_FLAG);
         data.flip();
 
         DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
@@ -118,5 +110,9 @@ public class MySocket {
         } catch (IOException ex) {
             ex.printStackTrace();
         }
+    }
+
+    public void addPacket(DatagramPacket packet) {
+        inPackets.add(packet);
     }
 }
