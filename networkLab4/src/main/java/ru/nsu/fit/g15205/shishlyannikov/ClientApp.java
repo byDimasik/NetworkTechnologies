@@ -17,7 +17,7 @@ public class ClientApp {
             recv = recv.substring(0, size);
             System.out.println(recv);
 
-            //socket.close();
+            socket.close();
         } catch (IOException ex) {
             ex.printStackTrace();
         }

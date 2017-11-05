@@ -21,8 +21,8 @@ public class MyServerSocket {
     private DatagramSocket datagramSocket;
     private State state = State.LISTEN;
 
-    private ConcurrentHashMap<String, MySocket> sockets = new ConcurrentHashMap<>();
-    private BlockingQueue<DatagramPacket> forAccept = new LinkedBlockingDeque<>();
+    private ConcurrentHashMap<String, MySocket> sockets = new ConcurrentHashMap<>(); // (адрес + порт) : сокет
+    private BlockingQueue<DatagramPacket> forAccept = new LinkedBlockingDeque<>();   // пакеты для accept
 
     private Thread receiver;
     private Thread sender;
@@ -54,7 +54,9 @@ public class MyServerSocket {
                     int ackNum = data.getInt();
                     byte flags = data.get();
 
+                    // если с клиентом уже работаем
                     if (sockets.containsKey(clientName)) {
+                        // если то, что ждали, ок, иначе, если уже было, еще раз отправляем акк, иначе игнор
                         if (seq != sockets.get(clientName).getExpectedSeqNum()) {
                             if (seq < sockets.get(clientName).getExpectedSeqNum()) {
                                 sockets.get(clientName).sendAck(++seq);
@@ -63,24 +65,26 @@ public class MyServerSocket {
                         }
                         sockets.get(clientName).incExpectedSeqNum();
 
+                        // если хотят завершиться, отправляем fin ack
                         if ((flags & FIN_FLAG) == FIN_FLAG) {
                             sockets.get(clientName).sendFinAck(++seq);
                             continue;
                         }
 
+                        // на акк удаляем у сокета соответствующий пакет
                         if ((flags & ACK_FLAG) == ACK_FLAG) {
                             sockets.get(clientName).removePacket(ackNum);
                             continue;
                         }
 
-                        sockets.get(clientName).sendAck(++seq);
-                        sockets.get(clientName).addPacket(receivedPacket);
+                        sockets.get(clientName).sendAck(++seq); //на все остальное отправляем акк
+                        sockets.get(clientName).addPacket(receivedPacket); // пихаем в очередь сокету
 
                         continue;
                     }
 
                     if (((flags & SYN_FLAG) == SYN_FLAG) || ((flags & ACK_FLAG) == ACK_FLAG)) {
-                        forAccept.add(receivedPacket);
+                        forAccept.add(receivedPacket); // если новый клиент, и это syn или ack отдаем accept(у)
                     }
                 } catch (SocketTimeoutException ex) {
                     continue;
@@ -93,18 +97,21 @@ public class MyServerSocket {
             while (!Thread.interrupted()) {
                 try {
                     for (Map.Entry<String, MySocket> entry : sockets.entrySet()) {
+                        // удаляем закрытые сокеты
                         if (entry.getValue().isClosed()) {
                             System.out.println("Connection remove");
                             sockets.remove(entry.getKey());
                             continue;
                         }
 
+                        // отправляем все акки
                         ArrayList<DatagramPacket> acks = entry.getValue().getAcksForSend();
 
                         for (DatagramPacket packet : acks) {
                             datagramSocket.send(packet);
                         }
 
+                        // отправляем все пакеты
                         ArrayList<DatagramPacket> forSend = entry.getValue().getPacketsForSend();
 
                         for (DatagramPacket packet : forSend) {
@@ -122,7 +129,6 @@ public class MyServerSocket {
     }
 
     public MySocket accept() {
-        long startTime = 0;
         int clientPort;
         int clientSeq;
         int ackNum;
@@ -132,11 +138,6 @@ public class MyServerSocket {
         MySocket mySocket;
 
         while (true) {
-            if ((state == State.SYN_RECEIVED) && ((System.currentTimeMillis() - startTime) > timeout)) {
-                state = State.LISTEN;
-                continue;
-            }
-
             try {
                 DatagramPacket receivedPacket = forAccept.take();
 
@@ -150,9 +151,8 @@ public class MyServerSocket {
                 ackNum = data.getInt();
                 flags = data.get();
 
-                //System.out.println(address + " " + clientPort + " " + clientSeq + " " + flags);
                 if ((state == State.LISTEN) && ((flags & SYN_FLAG) == SYN_FLAG)) {
-                    // новое соединение
+                    // новое соединение, получили syn
                     data.clear();
 
                     data.putInt(sequenceNum++);
@@ -164,7 +164,6 @@ public class MyServerSocket {
                     try {
                         // отправляем syn ack пакет и переходим в состояние ожидания ответа
                         datagramSocket.send(packet);
-                        startTime = System.currentTimeMillis();
                         state = State.SYN_RECEIVED;
                     } catch (IOException ex) {
                         ex.printStackTrace();
@@ -187,6 +186,7 @@ public class MyServerSocket {
     public boolean close() {
         boolean res = true;
 
+        // закрываем все наши сокеты, если хоть один завершился неуспешно, то и серверсокет звершается неуспешно
         for (MySocket socket : sockets.values()) {
             try {
                 if (!socket.close()) {
@@ -197,6 +197,7 @@ public class MyServerSocket {
             }
         }
 
+        //убиваем ресивера, если он висит на receive, то с первого раза не получится
         while (!receiver.isInterrupted()) {
             receiver.interrupt();
         }

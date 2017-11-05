@@ -18,7 +18,20 @@ public class ServerApp {
 
             socket.send(recv.getBytes());
 
+            MySocket socket1 = serverSocket.accept();
+
+            buffer = new byte[50];
+            size = socket1.receive(buffer);
+            recv = new String(buffer);
+            recv = recv.substring(0, size);
+
+            recv = recv.toUpperCase();
+
+            socket1.send(recv.getBytes());
+            socket1.close();
+
             socket.close();
+
 
             System.out.println(serverSocket.close());
         } catch (IOException ex) {
