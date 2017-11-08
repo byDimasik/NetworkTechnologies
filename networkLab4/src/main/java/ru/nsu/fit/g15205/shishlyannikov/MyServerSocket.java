@@ -14,8 +14,9 @@ public class MyServerSocket {
     private final byte FIN_FLAG = 4;
 
     private final short HEADER_SIZE = 9;
-    private final short MAX_PACKET_SIZE = HEADER_SIZE + 1024;
-    private final int timeout = 10000;
+    private final short MAX_PACKET_SIZE = 1024;
+
+    private final int timeout = 1000;
 
     private int sequenceNum = 1;
     private DatagramSocket datagramSocket;
@@ -56,28 +57,35 @@ public class MyServerSocket {
 
                     // если с клиентом уже работаем
                     if (sockets.containsKey(clientName)) {
-                        // если то, что ждали, ок, иначе, если уже было, еще раз отправляем акк, иначе игнор
+                        // на акк удаляем у сокета соответствующий пакет
+                        if ((flags & ACK_FLAG) == ACK_FLAG) {
+                            sockets.get(clientName).removePacket(ackNum);
+                            if (seq == sockets.get(clientName).getExpectedSeqNum()) {
+                                sockets.get(clientName).incExpectedSeqNum();
+                            }
+                            continue;
+                        }
+
+                        // если то, что ждали, ок, иначе, если уже было, еще раз отправляем акк, иначе запоминаем
                         if (seq != sockets.get(clientName).getExpectedSeqNum()) {
                             if (seq < sockets.get(clientName).getExpectedSeqNum()) {
                                 sockets.get(clientName).sendAck(++seq);
                             }
+                            else {
+                                sockets.get(clientName).addUnexpectedPacket(seq, receivedPacket);
+                                sockets.get(clientName).sendAck(++seq);
+                            }
                             continue;
                         }
+
                         sockets.get(clientName).incExpectedSeqNum();
 
-                        // если хотят завершиться, отправляем fin ack
+                        sockets.get(clientName).sendAck(++seq); //на все остальное отправляем акк
+
                         if ((flags & FIN_FLAG) == FIN_FLAG) {
                             sockets.get(clientName).sendFinAck(++seq);
-                            continue;
                         }
 
-                        // на акк удаляем у сокета соответствующий пакет
-                        if ((flags & ACK_FLAG) == ACK_FLAG) {
-                            sockets.get(clientName).removePacket(ackNum);
-                            continue;
-                        }
-
-                        sockets.get(clientName).sendAck(++seq); //на все остальное отправляем акк
                         sockets.get(clientName).addPacket(receivedPacket); // пихаем в очередь сокету
 
                         continue;
@@ -87,6 +95,7 @@ public class MyServerSocket {
                         forAccept.add(receivedPacket); // если новый клиент, и это syn или ack отдаем accept(у)
                     }
                 } catch (SocketTimeoutException ex) {
+                    //System.out.println("timeout");
                     continue;
                 } catch (IOException ex) {
                     ex.printStackTrace();
@@ -99,7 +108,7 @@ public class MyServerSocket {
                     for (Map.Entry<String, MySocket> entry : sockets.entrySet()) {
                         // удаляем закрытые сокеты
                         if (entry.getValue().isClosed()) {
-                            System.out.println("Connection remove");
+                            //System.out.println("Connection remove");
                             sockets.remove(entry.getKey());
                             continue;
                         }

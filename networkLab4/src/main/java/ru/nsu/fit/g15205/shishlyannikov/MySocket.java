@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 public class MySocket {
     enum State { CLOSED, ESTABLISHED, FIN }
@@ -16,7 +17,8 @@ public class MySocket {
     private final byte RST_FLAG = 8;
 
     private final short HEADER_SIZE = 9;
-    private final short MAX_PACKET_SIZE = HEADER_SIZE + 1024;
+    private final short MAX_PACKET_SIZE = 1024;
+    private final short MAX_DATA_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
 
     private DatagramSocket datagramSocket = null;
     private BlockingQueue<DatagramPacket> inPackets = new LinkedBlockingDeque<>(); // входящие пакеты
@@ -24,6 +26,7 @@ public class MySocket {
     private ConcurrentHashMap<Integer, DatagramPacket> outPackets = new ConcurrentHashMap<>();
     //аки, которые нужно отправить
     private BlockingQueue<DatagramPacket> acks = new LinkedBlockingDeque<>();
+    private ConcurrentHashMap<Integer, DatagramPacket> unexpectedPackets = new ConcurrentHashMap<>();
 
     private int sequenceNum = 1; // наш sequence number
     private int expectedSeqNum;  // ожидаемый sequence number
@@ -59,7 +62,7 @@ public class MySocket {
      */
     public MySocket(String host, int port) throws SocketException {
         datagramSocket = new DatagramSocket();
-        datagramSocket.setSoTimeout(10000);
+        datagramSocket.setSoTimeout(1000);
 
         this.destinationPort = port;
 
@@ -69,73 +72,7 @@ public class MySocket {
             ex.printStackTrace();
         }
 
-        // тк серверсокета у нас в этом случае нет, этот поток эмулирует его работу: принимает пакеты и запихивает
-        // их в очередь для приема
-        receiver = new Thread(() -> {
-            synchronized (obj) {
-                try {
-                    obj.wait(); // ждем коннекта
-                } catch (InterruptedException ex) {
-                    ex.printStackTrace();
-                }
-            }
-
-            // работаем, пока сокет не закроют, а потом пока не отправим все пакеты и не дождемся на них акков
-            while (state != State.FIN || !outPackets.isEmpty()) {
-                try {
-                    byte[] buffer = new byte[MAX_PACKET_SIZE];
-                    DatagramPacket receivedPacket = new DatagramPacket(buffer, buffer.length);
-
-                    datagramSocket.receive(receivedPacket);
-
-                    ByteBuffer data = ByteBuffer.wrap(receivedPacket.getData());
-                    int seq = data.getInt();
-                    int ackNum = data.getInt();
-                    byte flags = data.get();
-
-                    // если получили не тот пакет, который ждем, пропускаем его без акка (клиент потом отправит снова)
-                    // если пакет уже получали, отправляем на него акк еще раз
-                    if (seq != expectedSeqNum) {
-                        if (seq < expectedSeqNum) {
-                            sendAck(++seq);
-                        }
-                        continue;
-                    }
-
-                    // ждем следующий пакет
-                    expectedSeqNum++;
-
-                    // если получили акк, удаляем пакет, который ждал этого акка
-                    if ((flags & ACK_FLAG) == ACK_FLAG) {
-                        removePacket(ackNum);
-                        continue;
-                    }
-
-                    // в любом другом случае отправляем акк на пришедший пакет
-                    sendAck(++seq);
-
-                    // если пришел флаг разорвать соединение, переходим в состояние завершения
-                    if ((flags & RST_FLAG) == RST_FLAG) {
-                        state = State.FIN;
-                        continue;
-                    }
-
-                    // если надо завершить работу, не принимаем больше пакетов, иначе помещаем пакет в очередь
-                    // для последующей обработки
-                    if (state != State.FIN) {
-                        inPackets.add(receivedPacket);
-                    }
-                } catch (SocketTimeoutException ex) {
-                    //ystem.out.println("timeout");
-                    continue;
-                } catch (IOException ex) {
-                    ex.printStackTrace();
-                }
-            }
-        });
-        receiver.start();
-
-        // а этот поток отправляет из очереди для отправки
+        // этот поток отправляет сообщения из акки из очередей для отправки
         sender = new Thread(() -> {
             // работаем, пока не нужно завершаться и пока есть, на что получить акки
             while (state != State.FIN || !outPackets.isEmpty()) {
@@ -157,6 +94,75 @@ public class MySocket {
             }
         });
         sender.start();
+
+        // тк серверсокета у нас в этом случае нет, этот поток эмулирует его работу: принимает пакеты и запихивает
+        // их в очередь для приема
+        receiver = new Thread(() -> {
+            synchronized (obj) {
+                try {
+                    obj.wait(); // ждем коннекта
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                }
+            }
+
+            // работаем, пока сокет не закроют, а потом пока не отправим все пакеты и не дождемся на них акков
+            while (state != State.FIN || !outPackets.isEmpty() || sender.isAlive()) {
+                try {
+                    byte[] buffer = new byte[MAX_PACKET_SIZE];
+                    DatagramPacket receivedPacket = new DatagramPacket(buffer, buffer.length);
+
+                    datagramSocket.receive(receivedPacket);
+
+                    ByteBuffer data = ByteBuffer.wrap(receivedPacket.getData());
+                    int seq = data.getInt();
+                    int ackNum = data.getInt();
+                    byte flags = data.get();
+
+                    // если получили акк, удаляем пакет, который ждал этого акка
+                    if ((flags & ACK_FLAG) == ACK_FLAG) {
+                        removePacket(ackNum);
+                        if (seq == getExpectedSeqNum()) {
+                            incExpectedSeqNum();
+                        }
+                        continue;
+                    }
+
+                    // если получили не тот пакет, который ждем
+                    // если пакет уже получали, отправляем на него акк еще раз
+                    // если этот пакет должен был прийти позже, запоминаем его
+                    if (seq != expectedSeqNum) {
+                        if (seq < expectedSeqNum) {
+                            sendAck(++seq);
+                        }
+                        else {
+                            addUnexpectedPacket(seq, receivedPacket);
+                            sendAck(++seq);
+                        }
+                        continue;
+                    }
+
+                    // ждем следующий пакет
+                    expectedSeqNum++;
+
+                    // в любом другом случае отправляем акк на пришедший пакет
+                    sendAck(++seq);
+
+                    // если пришел флаг разорвать соединение, переходим в состояние завершения
+                    if ((flags & RST_FLAG) == RST_FLAG) {
+                        setFinState();
+                        continue;
+                    }
+
+                    inPackets.add(receivedPacket);
+                } catch (SocketTimeoutException ex) {
+                    continue;
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+        receiver.start();
 
         // коннектимся к серверу по переданному адресу
         try {
@@ -263,32 +269,48 @@ public class MySocket {
     /***
      * Принимаем данные
      * @param buffer и кладем их сюда
-     * @return возвращаем количество считанных байт
+     * @return возвращаем количество считанных байт, если больше 2 секунд тут висим, возвращаем ошибку -1
      */
     public int receive(byte[] buffer) {
-        // если мы в состоянии завершения, ничего не принимаем
-        if (state == State.FIN) {
-            return 0;
-        }
-
-        while (true) {
+        for (int i = 0; i < 2; i++) {
             try {
-                DatagramPacket packet = inPackets.take(); // забираем пакет из очереди
+                if (inPackets.isEmpty()) { // если очередь пустая, ищем следующий пакет в списке нежданых
+                    if (unexpectedPackets.containsKey(expectedSeqNum)) {
+                        addPacket(unexpectedPackets.get(expectedSeqNum));
+                        unexpectedPackets.remove(expectedSeqNum);
+                        incExpectedSeqNum();
+                    }
+                }
 
+                DatagramPacket packet = inPackets.poll(1000, TimeUnit.MILLISECONDS); // забираем пакет из очереди
+                if (packet == null) {
+                    continue;
+                }
                 ByteBuffer data = ByteBuffer.wrap(packet.getData());
 
                 data.getInt();
                 data.getInt();
-                data.get();
+                byte flags = data.get();
+
+                if ((flags & FIN_FLAG) == FIN_FLAG) {
+                    setFinState();
+                    return 0;
+                }
 
                 int size = data.getInt();
+                //System.out.println(size);
+                byte[] tmp = new byte[size];
 
-                data.get(buffer);
+                data.get(tmp);
+                System.arraycopy(tmp, 0, buffer, 0, tmp.length);
+
                 return size;
             } catch (InterruptedException ex) {
                 ex.printStackTrace();
             }
         }
+
+        return -1;
     }
 
     /***
@@ -296,27 +318,29 @@ public class MySocket {
       * @param buffer - массив байт для отправки
      */
     public void send(byte[] buffer) throws SocketException {
-        if (state == State.FIN) {
+        if (state == State.FIN && outPackets.isEmpty()) {
             throw new SocketException("socket closed");
         }
 
+        int max_size = MAX_DATA_SIZE - 4; // чтобы передавать длину данных, пихаем еще один инт в заголовок
         int size;
 
-        // если пакет больше, чем MAX_PACKET_SIZE бьем его на куски равные MAX_PACKET_SIZE
-        for (int i = 0; i < buffer.length; i += (MAX_PACKET_SIZE - HEADER_SIZE)) {
-            size = (buffer.length - i) > (MAX_PACKET_SIZE - HEADER_SIZE) ? MAX_PACKET_SIZE : ((buffer.length - i) + HEADER_SIZE);
+        // если пакет больше, чем MAX_SIZE бьем его на куски равные MAX_SIZE
+        for (int i = 0; i < buffer.length; i += max_size) {
+            size = (buffer.length - i) > max_size ? max_size : (buffer.length - i);
 
-            ByteBuffer data = ByteBuffer.allocate(size + 4);
+            ByteBuffer data = ByteBuffer.allocate(MAX_PACKET_SIZE);
 
             data.putInt(sequenceNum++);
             data.putInt(0);
             data.put((byte) 0);
 
-            data.putInt(size - HEADER_SIZE);
-            data.put(buffer);
+            data.putInt(size);
+            byte[] tmp = new byte[size];
+            System.arraycopy(buffer, i, tmp, 0, size);
+            data.put(tmp);
 
             DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
-
             outPackets.put(sequenceNum, packet);
         }
     }
@@ -374,7 +398,7 @@ public class MySocket {
 
             synchronized (obj) {
                 try {
-                    obj.wait(10000); // даем 10 секунд за завершение всех дел, либо пока нас не разбудят
+                    obj.wait(1000); // даем секунду за завершение всех дел, либо пока нас не разбудят
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
                 }
@@ -442,11 +466,17 @@ public class MySocket {
         data.put((byte)(ACK_FLAG | FIN_FLAG));
 
         outPackets.put(sequenceNum, new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort));
-        state = State.FIN;
     }
 
     public boolean isClosed() {
-        // мы завершили работу если нам сказали это сделать, и очереди на отправку и принятие пусты
-        return (state == State.FIN) && inPackets.isEmpty() && outPackets.isEmpty();
+        return (state == State.FIN);
+    }
+
+    public void setFinState() {
+        state = State.FIN;
+    }
+
+    public void addUnexpectedPacket(int seq, DatagramPacket packet) {
+        unexpectedPackets.put(seq, packet);
     }
 }
