@@ -9,27 +9,25 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.*;
 
-/***
- * f1f8f4bf413b16ad135722aa4591043e - ACGT
- * c9ee3aba6598b0b16b0d955b0a5e654d - ACGTACGTA
- */
 public class Server extends Thread {
-    private final int MAX_LENGTH = 50;
-    private final int STEP = 2;
+    private final int MAX_LENGTH = 15;
+    private final int CLIENT_MAX_LEN = 9;
     private final int TIMEOUT = 5000;
+    private final int UUID_LEN = 36;
 
-    private String alphabet = "ACGT";
+    private String prefix = "";
+
     private String hashToBreaking;
     private Selector selector;
     private ServerSocketChannel serverSocketChannel;
 
-    private Map<String, Integer> clientsWork = new HashMap<>();
-    private Map<String, Long> clientsTime = new HashMap<>();
+    private Map<String, String> clientsWork = new HashMap<>(); // кому какую работу дали
+    private Map<String, Long> clientsTime = new HashMap<>();   // кто когда последний раз проявлял активность
 
-    private ArrayList<Integer> failedPeriods = new ArrayList<>();
-    private int lastPeriod = 0;
+    private ArrayList<String> failedWorks = new ArrayList<>();
 
     private boolean COMPLETE = false;
+    private boolean END_WORK = false;
 
     public Server(String hash, int port) {
         hashToBreaking = hash;
@@ -49,16 +47,19 @@ public class Server extends Thread {
 
     public void run() {
         int num;
-        boolean WORK = true;
 
-        while (WORK || !clientsTime.isEmpty()) {
+        // пока не найдем строку или, если работы больше нет, пока не доработают все клиенты
+        while (!COMPLETE || !clientsTime.isEmpty()) {
+
             try {
+                // удаляем тех, кто помер (не отвечал 5 секунд)
                 long currentTime = System.currentTimeMillis();
+
                 ArrayList<String> forDelete = new ArrayList<>();
                 for (Map.Entry<String, Long> entry : clientsTime.entrySet()) {
                     if ((currentTime - entry.getValue()) > TIMEOUT) {
                         forDelete.add(entry.getKey());
-                        failedPeriods.add(clientsWork.get(entry.getKey()));
+                        failedWorks.add(clientsWork.get(entry.getKey())); // добавляем работу в список невыполненных
                     }
                 }
 
@@ -66,6 +67,12 @@ public class Server extends Thread {
                     clientsTime.remove(key);
                     clientsWork.remove(key);
                 }
+
+                if (END_WORK && clientsTime.isEmpty()) {
+                    // если работы нет и все клиенты отвалились или закончиили работу
+                    break;
+                }
+                //----------------------------------------------
 
                 int selectNum = selector.select(300);
 
@@ -84,7 +91,6 @@ public class Server extends Thread {
 
                         clientChannel.configureBlocking(false);
                         clientChannel.register(selector, SelectionKey.OP_READ);
-                        //System.out.println("Connection Accepted: " + clientChannel.getRemoteAddress() + "\n");
                     } else if (key.isReadable()) {
                         SocketChannel clientChannel = (SocketChannel) key.channel();
 
@@ -104,14 +110,13 @@ public class Server extends Thread {
 
                         buffer.flip();
 
-                        int len = buffer.getInt();
-                        byte[] uuidByte = new byte[len];
-                        buffer.get(uuidByte, 0, len);
+                        // сначала всегда uuid клиента
+                        byte[] uuidByte = new byte[UUID_LEN];
+                        buffer.get(uuidByte, 0, UUID_LEN);
                         String uuid = new String(uuidByte);
 
                         if (COMPLETE) {
-                            WORK = false;
-
+                            // если мы уже все посчитали, говорим клиенту завершиться
                             clientChannel.write(ByteBuffer.wrap("END".getBytes("UTF-8")));
                             clientChannel.close();
                             key.cancel();
@@ -127,46 +132,44 @@ public class Server extends Thread {
                         }
 
                         if (clientsWork.containsKey(uuid)) {
+                            // если ждем от клиента работы
                             clientsTime.put(uuid, System.currentTimeMillis());
 
                             byte[] flag = new byte[3];
                             buffer.get(flag, 0, 3);
 
-                            if ("RES".equals(new String(flag))) {
-                                int lenHash = buffer.getInt();
-                                byte[] hashBytes = new byte[lenHash];
-                                buffer.get(hashBytes);
+                            if ("SUC".equals(new String(flag))) {
+                                // если клиент нашел ответ
+                                int lenRes = buffer.getInt();
+                                byte[] resBytes = new byte[lenRes];
+                                buffer.get(resBytes);
 
-                                if (hashToBreaking.equals(new String(hashBytes))) {
-                                    int lenString = buffer.getInt();
-                                    byte[] stringBytes = new byte[lenString];
-                                    buffer.get(stringBytes);
+                                System.err.println("Искомая строка: " + new String(resBytes));
 
-                                    System.out.println("Искомая строка: " + new String(stringBytes));
-                                    clientChannel.write(ByteBuffer.wrap("END".getBytes("UTF-8")));
-                                    clientChannel.close();
-                                    key.cancel();
-                                    iterator.remove();
+                                clientChannel.close();
+                                key.cancel();
+                                iterator.remove();
 
-                                    clientsWork.remove(uuid);
-                                    clientsTime.remove(uuid);
+                                clientsWork.remove(uuid);
+                                clientsTime.remove(uuid);
 
-                                    WORK = false;
-                                    COMPLETE = true;
-                                    continue;
-                                } else {
-                                    clientChannel.write(ByteBuffer.wrap("CON".getBytes("UTF-8")));
-                                    iterator.remove();
-                                    continue;
-                                }
+                                COMPLETE = true;
+                                continue;
                             }
+                        } else {
+                            // если клиент первый раз - отправляем ему хэш
+                            buffer = ByteBuffer.allocate(3 + hashToBreaking.length());
+                            buffer.put("HSH".getBytes("UTF-8"));
+                            buffer.put(hashToBreaking.getBytes("UTF-8"));
+                            buffer.flip();
+                            clientChannel.write(buffer);
                         }
 
-                        if (!sendNewPeriod(uuid, clientChannel)) {
+                        // отправляем новую задачу клиенту
+                        if (!sendNewPrefix(uuid, clientChannel)) {
                             clientChannel.close();
                             key.cancel();
                             iterator.remove();
-                            WORK = false;
                             continue;
                         }
                     }
@@ -177,35 +180,49 @@ public class Server extends Thread {
                 break;
             }
         }
+
+        if (!COMPLETE) {
+            System.err.println("Не удалось взломать md5 хэш");
+        }
     }
 
-    private boolean sendNewPeriod(String uuid, SocketChannel clientChannel) {
+    private boolean sendNewPrefix(String uuid, SocketChannel clientChannel) {
         try {
-            int period;
+            String current_prefix;
 
-            if (!failedPeriods.isEmpty()) {
-                period = failedPeriods.get(0);
-                failedPeriods.remove(0);
+            if (!failedWorks.isEmpty()) { // если есть невыполненные работы - они в приоритете
+                current_prefix = failedWorks.get(0);
+                failedWorks.remove(0);
             } else {
-                period = ++lastPeriod;
+                current_prefix = prefix;
+                prefix = Alphabet.getNextWord(prefix); // следующий префикс по алфавиту
             }
 
-            if ((period * STEP) > MAX_LENGTH) {
-                if (clientsTime.isEmpty()) {
-                    COMPLETE = true;
-                }
+            if (current_prefix.length() > (MAX_LENGTH - CLIENT_MAX_LEN)) {
+                // если префикс стал максимальной длины - значит все уже перебрали, конец работы
+                END_WORK = true;
                 clientChannel.write(ByteBuffer.wrap("END".getBytes("UTF-8")));
+                if (clientsWork.containsKey(uuid)) {
+                    clientsWork.remove(uuid);
+                }
+                if (clientsTime.containsKey(uuid)) {
+                    clientsTime.remove(uuid);
+                }
                 return false;
             }
 
-            clientsWork.put(uuid, period);
+            clientsWork.put(uuid, current_prefix);
             clientsTime.put(uuid, System.currentTimeMillis());
 
-            ByteBuffer buffer = ByteBuffer.allocate(3 + 4); // flag + period
+            ByteBuffer buffer = ByteBuffer.allocate(3 + 4 + current_prefix.length()); // flag + period
             buffer.put("ANS".getBytes("UTF-8"));
-            buffer.putInt(period);
+            buffer.putInt(current_prefix.length());
+            if (current_prefix.length() != 0) {
+                buffer.put(current_prefix.getBytes("UTF-8"));
+            }
             buffer.flip();
 
+            System.err.println("send prefix " + current_prefix + " to " + uuid);
             clientChannel.write(buffer);
 
             return true;

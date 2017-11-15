@@ -1,5 +1,7 @@
 package ru.nsu.fit.g15205.shishlyannikov;
 
+import java.io.IOException;
+
 public class ClientApp {
     public static void main(String args[]) {
         String serverAddress = null;
@@ -13,6 +15,8 @@ public class ClientApp {
             client.start();
         } catch (IndexOutOfBoundsException | NumberFormatException ex) {
             System.out.println("Нужно передать адрес и порт сервера");
+        } catch (IOException ex) {
+            ex.printStackTrace();
         }
     }
 }
