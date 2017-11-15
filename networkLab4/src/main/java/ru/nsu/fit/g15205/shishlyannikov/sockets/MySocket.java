@@ -1,4 +1,4 @@
-package ru.nsu.fit.g15205.shishlyannikov;
+package ru.nsu.fit.g15205.shishlyannikov.sockets;
 
 import java.io.IOException;
 import java.net.*;
@@ -41,13 +41,15 @@ public class MySocket {
 
     private final Object obj = new Object();
 
+    private byte[] outData;
+
     /***
      * Конструктор для MySocketServer, в этом конструкторе не создается своего udp сокета
      * @param host - адрес
      * @param port - порт
      * @param clientSeq - ожидаемый sequence number
      */
-    public MySocket(InetAddress host, int port, int clientSeq) {
+    MySocket(InetAddress host, int port, int clientSeq) {
         destinationAddress = host;
 
         destinationPort = port;
@@ -166,7 +168,10 @@ public class MySocket {
 
         // коннектимся к серверу по переданному адресу
         try {
-            connect();
+            boolean ret = connect();
+            if (!ret) {
+                throw new SocketException("Не удалось установить соединение по указанному адресу");
+            }
         } catch (IOException ex) {
             System.err.println(ex.getLocalizedMessage());
         }
@@ -175,8 +180,8 @@ public class MySocket {
     /***
      * Классический коннект с тройным рукопожатием
      */
-    private void connect() throws IOException {
-        while (true) {
+    private boolean connect() throws IOException {
+        for (int i = 0; i < 5; i++) {
             ByteBuffer data = ByteBuffer.allocate(HEADER_SIZE);
 
             data.putInt(sequenceNum++);
@@ -217,7 +222,7 @@ public class MySocket {
                         obj.notify(); // будим ресивера
                     }
                     System.out.println("Connection Established");
-                    break;
+                    return true;
                 } else {
                     throw new IOException("Received SYN, but not ACK. Or ack num wrong");
                 }
@@ -226,18 +231,21 @@ public class MySocket {
             }
 
             try {
-                Thread.sleep(10000); // через 10 секунд пробуем коннектиться снова
+                Thread.sleep(3000); // через 3 секунды пробуем коннектиться снова
+                state = State.CLOSED;
             } catch (InterruptedException ex) {
                 ex.printStackTrace();
             }
         }
+
+        return false;
     }
 
     /***
      * Отправка акка
      * @param ackNum - номер акка
      */
-    public void sendAck(int ackNum) {
+    void sendAck(int ackNum) {
         ByteBuffer data = ByteBuffer.allocate(20);
 
         data.putInt(sequenceNum++);
@@ -250,11 +258,11 @@ public class MySocket {
         acks.add(packet);
     }
 
-    public int getExpectedSeqNum() {
+    int getExpectedSeqNum() {
         return expectedSeqNum;
     }
 
-    public void incExpectedSeqNum() {
+    void incExpectedSeqNum() {
         expectedSeqNum++;
     }
 
@@ -262,7 +270,7 @@ public class MySocket {
      * Добавить входящий пакет
      * @param packet - пакет
      */
-    public void addPacket(DatagramPacket packet) {
+    void addPacket(DatagramPacket packet) {
         inPackets.add(packet);
     }
 
@@ -272,20 +280,53 @@ public class MySocket {
      * @return возвращаем количество считанных байт, если больше 2 секунд тут висим, возвращаем ошибку -1
      */
     public int receive(byte[] buffer) {
-        for (int i = 0; i < 2; i++) {
+        int ret = 0;
+
+        // если есть что-то, что мы не выдали в прошлые вызовы receive
+        if (outData != null) {
+            int size;
+            byte[] newOutData = null;
+            if (outData.length > buffer.length) {
+                size = buffer.length;
+                newOutData = new byte[outData.length - buffer.length];
+            } else {
+                size = outData.length;
+            }
+
+            System.arraycopy(outData, 0, buffer, 0, size);
+            ret += size;
+
+            if (newOutData != null) {
+                System.arraycopy(outData, size, newOutData, 0, newOutData.length);
+                outData = newOutData;
+                return ret;
+            } else {
+                outData = null;
+            }
+        }
+
+        while (ret < buffer.length) {
             try {
-                if (inPackets.isEmpty()) { // если очередь пустая, ищем следующий пакет в списке нежданых
-                    if (unexpectedPackets.containsKey(expectedSeqNum)) {
-                        addPacket(unexpectedPackets.get(expectedSeqNum));
-                        unexpectedPackets.remove(expectedSeqNum);
-                        incExpectedSeqNum();
+                DatagramPacket packet = null;
+                for (int i = 0; i < 3; i++) {
+                    if (inPackets.isEmpty()) { // если очередь пустая, ищем следующий пакет в списке нежданых
+                        if (unexpectedPackets.containsKey(expectedSeqNum)) {
+                            addPacket(unexpectedPackets.get(expectedSeqNum));
+                            unexpectedPackets.remove(expectedSeqNum);
+                            incExpectedSeqNum();
+                        }
+                    }
+
+                    packet = inPackets.poll(1000, TimeUnit.MILLISECONDS); // забираем пакет из очереди
+                    if (packet != null) {
+                        break;
                     }
                 }
 
-                DatagramPacket packet = inPackets.poll(1000, TimeUnit.MILLISECONDS); // забираем пакет из очереди
                 if (packet == null) {
-                    continue;
+                    return ret;
                 }
+
                 ByteBuffer data = ByteBuffer.wrap(packet.getData());
 
                 data.getInt();
@@ -298,19 +339,29 @@ public class MySocket {
                 }
 
                 int size = data.getInt();
-                //System.out.println(size);
+
                 byte[] tmp = new byte[size];
-
                 data.get(tmp);
-                System.arraycopy(tmp, 0, buffer, 0, tmp.length);
 
-                return size;
+                // если очередной пакет не влезает в буффер
+                if (ret + size > buffer.length) {
+                    int outSize = (ret + size) - buffer.length;
+                    outData = new byte[outSize];
+
+                    System.arraycopy(tmp, size - outSize, outData, 0, outSize);
+
+                    System.arraycopy(tmp, 0, buffer, ret, (buffer.length - ret));
+                    ret += (buffer.length - ret);
+                } else {
+                    System.arraycopy(tmp, 0, buffer, ret, size);
+                    ret += size;
+                }
             } catch (InterruptedException ex) {
                 ex.printStackTrace();
             }
         }
 
-        return -1;
+        return ret;
     }
 
     /***
@@ -322,7 +373,7 @@ public class MySocket {
             throw new SocketException("socket closed");
         }
 
-        int max_size = MAX_DATA_SIZE - 4; // чтобы передавать длину данных, пихаем еще один инт в заголовок
+        int max_size = MAX_DATA_SIZE - 4;
         int size;
 
         // если пакет больше, чем MAX_SIZE бьем его на куски равные MAX_SIZE
@@ -336,6 +387,7 @@ public class MySocket {
             data.put((byte) 0);
 
             data.putInt(size);
+
             byte[] tmp = new byte[size];
             System.arraycopy(buffer, i, tmp, 0, size);
             data.put(tmp);
@@ -345,11 +397,11 @@ public class MySocket {
         }
     }
 
-    public ArrayList<DatagramPacket> getPacketsForSend() {
+    ArrayList<DatagramPacket> getPacketsForSend() {
         return new ArrayList<>(outPackets.values());
     }
 
-    public ArrayList<DatagramPacket> getAcksForSend() {
+    ArrayList<DatagramPacket> getAcksForSend() {
         ArrayList<DatagramPacket> ret = new ArrayList<>();
 
         acks.drainTo(ret); // забираем все из очереди и кладем в лист
@@ -361,7 +413,7 @@ public class MySocket {
      * Удалить пакет по номеру ожидаемого акка
      * @param ackNum - номер пришедшего акка
      */
-    public void removePacket(int ackNum) {
+    void removePacket(int ackNum) {
         if (outPackets.containsKey(ackNum)) {
             outPackets.remove(ackNum);
         }
@@ -458,7 +510,7 @@ public class MySocket {
         }
     }
 
-    public void sendFinAck(int ackNum) {
+    void sendFinAck(int ackNum) {
         ByteBuffer data = ByteBuffer.allocate(HEADER_SIZE);
 
         data.putInt(sequenceNum++);
@@ -468,15 +520,15 @@ public class MySocket {
         outPackets.put(sequenceNum, new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort));
     }
 
-    public boolean isClosed() {
+    boolean isClosed() {
         return (state == State.FIN);
     }
 
-    public void setFinState() {
+    private void setFinState() {
         state = State.FIN;
     }
 
-    public void addUnexpectedPacket(int seq, DatagramPacket packet) {
+    void addUnexpectedPacket(int seq, DatagramPacket packet) {
         unexpectedPackets.put(seq, packet);
     }
 }

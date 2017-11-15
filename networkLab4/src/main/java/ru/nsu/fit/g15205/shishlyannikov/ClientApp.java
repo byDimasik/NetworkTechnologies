@@ -1,5 +1,7 @@
 package ru.nsu.fit.g15205.shishlyannikov;
 
+import ru.nsu.fit.g15205.shishlyannikov.sockets.MySocket;
+
 import java.io.FileInputStream;
 import java.io.IOException;
 
@@ -10,7 +12,7 @@ public class ClientApp {
     public static void main( String[] args )
     {
         try {
-            FileInputStream inputStream = new FileInputStream("test.psd");
+            FileInputStream inputStream = new FileInputStream("test.jpg");
             MySocket socket = new MySocket("localhost", 1111);
 
             byte[] buffer = new byte[10000];

@@ -1,4 +1,4 @@
-package ru.nsu.fit.g15205.shishlyannikov;
+package ru.nsu.fit.g15205.shishlyannikov.sockets;
 
 import java.io.IOException;
 import java.net.*;
