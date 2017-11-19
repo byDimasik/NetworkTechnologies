@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.net.BindException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.security.MessageDigest;
@@ -22,7 +23,7 @@ public class Client extends Thread {
 
     private InetSocketAddress serverAddress;
 
-    private String hashToBreaking;
+    private String hashToBreaking = null;
     private String current_prefix;
 
     public Client(String serverAddress, int serverPort) throws IOException {
@@ -43,18 +44,6 @@ public class Client extends Thread {
 
             socketChannel.write(buffer);
             //----------------
-
-            // получаем хэш
-            buffer = ByteBuffer.allocate(3 + HASH_LEN);
-            socketChannel.read(buffer);
-            buffer.flip();
-            byte[] flag = new byte[3];
-            byte[] hashByte = new byte[HASH_LEN];
-            buffer.get(flag, 0, 3);
-            buffer.get(hashByte);
-            hashToBreaking = new String(hashByte);
-            //----------------
-            System.err.println("Hash to breaking: " + hashToBreaking);
         } catch (IOException ex) {
             ex.printStackTrace();
         }
@@ -101,7 +90,12 @@ public class Client extends Thread {
                 buffer.flip();
 
                 byte[] ansByte = new byte[3];
-                buffer.get(ansByte, 0, 3);
+                try {
+                    buffer.get(ansByte, 0, 3);
+                } catch (BufferUnderflowException ex) {
+                    send_task_request();
+                    continue;
+                }
                 String answer = new String(ansByte);
 
                 switch (answer) {
@@ -119,14 +113,32 @@ public class Client extends Thread {
                             System.err.println("New task: empty prefix");
                         } else {
                             byte[] prefixByte = new byte[prefixLen];
-                            buffer.get(prefixByte);
+                            try {
+                                buffer.get(prefixByte);
+                            } catch (BufferUnderflowException ex) {
+                                send_task_request();
+                                continue;
+                            }
                             current_prefix = new String(prefixByte);
                             System.err.println("New task: received new prefix: " + current_prefix);
                         }
                         socketChannel.close();
                         break;
                     case "HSH":
-                        // пока мы считали, сервер нас забыл и снова прислал нам хэш
+                        if (hashToBreaking != null) {
+                            // сервер нас забыл, пока мы считали
+                            continue;
+                        }
+                        // получаем хэш
+                        byte[] hashByte = new byte[HASH_LEN];
+                        try {
+                            buffer.get(hashByte);
+                        } catch (BufferUnderflowException ex) {
+                            throw new IOException("Хэш пришел не полностью");
+                        }
+                        hashToBreaking = new String(hashByte);
+                        System.err.println("Hash to breaking: " + hashToBreaking);
+
                         continue;
                     default:
                         socketChannel.close();
@@ -173,7 +185,7 @@ public class Client extends Thread {
                     socketChannel.write(buffer);
                 }
             } catch (IOException ex) {
-                System.err.println("Сервер помер");
+                System.err.println(ex.getLocalizedMessage());
                 break;
             }
         }
@@ -243,6 +255,20 @@ public class Client extends Thread {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void send_task_request() {
+        try {
+            ByteBuffer buffer = ByteBuffer.allocate(UUID_LEN + 3);
+
+            buffer.put(uuid.getBytes("UTF-8"));
+            buffer.put("NXT".getBytes("UTF-8"));
+            buffer.flip();
+
+            socketChannel.write(buffer);
+        } catch (IOException ex) {
             ex.printStackTrace();
         }
     }
