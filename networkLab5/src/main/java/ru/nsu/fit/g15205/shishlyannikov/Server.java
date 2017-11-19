@@ -2,6 +2,7 @@ package ru.nsu.fit.g15205.shishlyannikov;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -14,6 +15,7 @@ public class Server extends Thread {
     private final int CLIENT_MAX_LEN = 9;
     private final int TIMEOUT = 5000;
     private final int UUID_LEN = 36;
+    private final int MAX_PACKET_SIZE = UUID_LEN + 3 + 4 + MAX_LENGTH;
 
     private String prefix = "";
 
@@ -90,11 +92,11 @@ public class Server extends Thread {
                         SocketChannel clientChannel = serverSocketChannel.accept();
 
                         clientChannel.configureBlocking(false);
-                        clientChannel.register(selector, SelectionKey.OP_READ);
-                    } else if (key.isReadable()) {
+                        clientChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                    } else if (key.isReadable() && key.isWritable()) {
                         SocketChannel clientChannel = (SocketChannel) key.channel();
 
-                        ByteBuffer buffer = ByteBuffer.allocate(10000);
+                        ByteBuffer buffer = ByteBuffer.allocate(MAX_PACKET_SIZE);
                         try {
                             num = clientChannel.read(buffer);
                         } catch (IOException ex) {
@@ -112,8 +114,13 @@ public class Server extends Thread {
 
                         // сначала всегда uuid клиента
                         byte[] uuidByte = new byte[UUID_LEN];
-                        buffer.get(uuidByte, 0, UUID_LEN);
-                        String uuid = new String(uuidByte);
+                        try {
+                            buffer.get(uuidByte, 0, UUID_LEN);
+                        } catch (BufferUnderflowException ex) {
+                            iterator.remove();
+                            continue;
+                        }
+                        String uuid = new String(uuidByte, "UTF-8");
 
                         if (COMPLETE) {
                             // если мы уже все посчитали, говорим клиенту завершиться
@@ -138,11 +145,16 @@ public class Server extends Thread {
                             byte[] flag = new byte[3];
                             buffer.get(flag, 0, 3);
 
-                            if ("SUC".equals(new String(flag))) {
+                            if ("SUC".equals(new String(flag, "UTF-8"))) {
                                 // если клиент нашел ответ
                                 int lenRes = buffer.getInt();
                                 byte[] resBytes = new byte[lenRes];
-                                buffer.get(resBytes);
+                                try {
+                                    buffer.get(resBytes);
+                                } catch (BufferUnderflowException ex) {
+                                    iterator.remove();
+                                    continue;
+                                }
 
                                 System.err.println("Искомая строка: " + new String(resBytes));
 

@@ -69,11 +69,9 @@ public class Client extends Thread {
             try {
                 socketChannel = SocketChannel.open(serverAddress);
                 return true;
-            } catch (BindException ex) {
+            } catch (IOException ex) {
                 socketChannel = null;
                 sleep(3000);
-            } catch (IOException ex) {
-                ex.printStackTrace();
             }
         }
 
@@ -229,8 +227,8 @@ public class Client extends Thread {
 
         String hash;
         for (int i = 0; i < Math.pow(4, CLIENT_MAX_LEN); i++) {
-            if (current_prefix.equals("GGGGCTG"))
-                System.out.println(current);
+//            if (current_prefix.equals("GGGGCTG"))
+//                System.out.println(current);
             hash = getHash(current);
             if (hashToBreaking.equals(hash)) {
                 return current;
