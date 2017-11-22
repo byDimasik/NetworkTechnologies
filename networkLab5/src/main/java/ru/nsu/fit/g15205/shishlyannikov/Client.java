@@ -2,10 +2,8 @@ package ru.nsu.fit.g15205.shishlyannikov;
 
 import java.io.*;
 import java.math.BigInteger;
-import java.net.BindException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
-import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.security.MessageDigest;
@@ -89,13 +87,20 @@ public class Client extends Thread {
 
                 buffer.flip();
 
-                byte[] ansByte = new byte[3];
-                try {
+                byte[] ansByte;
+                if (num >= 3) {
+                    ansByte = new byte[3];
                     buffer.get(ansByte, 0, 3);
-                } catch (BufferUnderflowException ex) {
-                    send_task_request();
-                    continue;
+                } else {
+                    ansByte = Server.more_receive(socketChannel, buffer, num, 3);
+                    if (ansByte == null) {
+                        socketChannel.close();
+                        System.err.println("Сервер помер.");
+                        break;
+                    }
                 }
+                num -= 3;
+
                 String answer = new String(ansByte);
 
                 switch (answer) {
@@ -107,18 +112,38 @@ public class Client extends Thread {
                         continue;
                     case "ANS":
                         // новая задача
-                        int prefixLen = buffer.getInt();
+                        int prefixLen;
+                        if (num >= 4) {
+                            prefixLen = buffer.getInt();
+                        } else {
+                            byte[] intByte = Server.more_receive(socketChannel, buffer, num, 4);
+                            if (intByte == null) {
+                                socketChannel.close();
+                                System.err.println("Сервер помер.");
+                                WORK = false;
+                                continue;
+                            }
+                            prefixLen = ByteBuffer.wrap(intByte).getInt();
+                        }
+                        num -= 4;
                         if (prefixLen == 0) {
                             current_prefix = "";
                             System.err.println("New task: empty prefix");
                         } else {
-                            byte[] prefixByte = new byte[prefixLen];
-                            try {
+                            byte[] prefixByte;
+                            if (num >= prefixLen) {
+                                prefixByte = new byte[prefixLen];
                                 buffer.get(prefixByte);
-                            } catch (BufferUnderflowException ex) {
-                                send_task_request();
-                                continue;
+                            } else {
+                                prefixByte = Server.more_receive(socketChannel, buffer, num, prefixLen);
+                                if (prefixByte == null) {
+                                    socketChannel.close();
+                                    System.err.println("Сервер помер.");
+                                    WORK = false;
+                                    continue;
+                                }
                             }
+
                             current_prefix = new String(prefixByte);
                             System.err.println("New task: received new prefix: " + current_prefix);
                         }
@@ -126,16 +151,24 @@ public class Client extends Thread {
                         break;
                     case "HSH":
                         if (hashToBreaking != null) {
-                            // сервер нас забыл, пока мы считали
+                            // сервер нас забыл, пока мы считали, просто получаем новую задачу
                             continue;
                         }
                         // получаем хэш
-                        byte[] hashByte = new byte[HASH_LEN];
-                        try {
+                        byte[] hashByte;
+                        if (num >= HASH_LEN) {
+                            hashByte = new byte[HASH_LEN];
                             buffer.get(hashByte);
-                        } catch (BufferUnderflowException ex) {
-                            throw new IOException("Хэш пришел не полностью");
+                        } else {
+                            hashByte = Server.more_receive(socketChannel, buffer, num, HASH_LEN);
+                            if (hashByte == null) {
+                                System.err.println("Сервер помер");
+                                socketChannel.close();
+                                WORK = false;
+                                continue;
+                            }
                         }
+
                         hashToBreaking = new String(hashByte);
                         System.err.println("Hash to breaking: " + hashToBreaking);
 
@@ -239,8 +272,6 @@ public class Client extends Thread {
 
         String hash;
         for (int i = 0; i < Math.pow(4, CLIENT_MAX_LEN); i++) {
-//            if (current_prefix.equals("GGGGCTG"))
-//                System.out.println(current);
             hash = getHash(current);
             if (hashToBreaking.equals(hash)) {
                 return current;

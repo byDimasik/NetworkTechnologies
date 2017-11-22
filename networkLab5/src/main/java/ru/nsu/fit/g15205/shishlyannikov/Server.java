@@ -113,13 +113,22 @@ public class Server extends Thread {
                         buffer.flip();
 
                         // сначала всегда uuid клиента
-                        byte[] uuidByte = new byte[UUID_LEN];
-                        try {
+                        byte[] uuidByte;
+
+                        if (num < UUID_LEN) {
+                            uuidByte = more_receive(clientChannel, buffer, num, UUID_LEN);
+                            if (uuidByte == null) {
+                                clientChannel.close();
+                                key.cancel();
+                                iterator.remove();
+                                continue;
+                            }
+                        } else {
+                            uuidByte = new byte[UUID_LEN];
                             buffer.get(uuidByte, 0, UUID_LEN);
-                        } catch (BufferUnderflowException ex) {
-                            iterator.remove();
-                            continue;
                         }
+                        num -= UUID_LEN;
+
                         String uuid = new String(uuidByte, "UTF-8");
 
                         if (COMPLETE) {
@@ -142,18 +151,50 @@ public class Server extends Thread {
                             // если ждем от клиента работы
                             clientsTime.put(uuid, System.currentTimeMillis());
 
-                            byte[] flag = new byte[3];
-                            buffer.get(flag, 0, 3);
+                            byte[] flag;
+                            if (num >= 3) {
+                                flag = new byte[3];
+                                buffer.get(flag, 0, 3);
+                            } else {
+                                flag = more_receive(clientChannel, buffer, num, 3);
+                                if (flag == null) {
+                                    clientChannel.close();
+                                    key.cancel();
+                                    iterator.remove();
+                                    continue;
+                                }
+                            }
+                            num -= 3;
 
                             if ("SUC".equals(new String(flag, "UTF-8"))) {
                                 // если клиент нашел ответ
-                                int lenRes = buffer.getInt();
-                                byte[] resBytes = new byte[lenRes];
-                                try {
+                                int lenRes;
+                                if (num >= 4) {
+                                    lenRes = buffer.getInt();
+                                } else {
+                                    byte[] intByte = more_receive(clientChannel, buffer, num, 4);
+                                    if (intByte == null) {
+                                        clientChannel.close();
+                                        key.cancel();
+                                        iterator.remove();
+                                        continue;
+                                    }
+                                    lenRes = ByteBuffer.wrap(intByte).getInt();
+                                }
+                                num -= 4;
+                                byte[] resBytes;
+
+                                if (num >= lenRes) {
+                                    resBytes = new byte[lenRes];
                                     buffer.get(resBytes);
-                                } catch (BufferUnderflowException ex) {
-                                    iterator.remove();
-                                    continue;
+                                } else {
+                                    resBytes = more_receive(clientChannel, buffer, num, lenRes);
+                                    if (resBytes == null) {
+                                        clientChannel.close();
+                                        key.cancel();
+                                        iterator.remove();
+                                        continue;
+                                    }
                                 }
 
                                 System.err.println("Искомая строка: " + new String(resBytes));
@@ -242,5 +283,47 @@ public class Server extends Thread {
             ex.printStackTrace();
             return false;
         }
+    }
+
+    /***
+     * Функция дополучения того, что не получили при чтении из канала
+     * @param clientChannel - канал из которого получаем данные
+     * @param received_buffer - что удалось получить
+     * @param received_num - сколько байт удалось получить
+     * @param need - сколько всего надо получить
+     * @return - возвращает массив байт размера need
+     */
+    static byte[] more_receive(SocketChannel clientChannel, ByteBuffer received_buffer, int received_num, int need) {
+        byte[] ret = new byte[need];
+        int index = 0;
+
+        if (received_num > 0) {
+            received_buffer.get(ret, 0, received_num); // записываем в возвращаемый массив то, что уже получили
+            index = received_num;
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(1);
+
+        int num;
+
+        // в цикле получаем по одному байту и записываем в ret, пока не получим сколько нам нужно
+        while (index != ret.length) {
+            try {
+                num = clientChannel.read(buffer);
+                if (num == 1) {
+                    ret[index] = buffer.array()[0];
+                    index++;
+                    buffer.clear();
+                }
+            } catch (IOException ex) {
+                num = -1;
+            }
+
+            if (num == -1) {
+                return null;
+            }
+        }
+
+        return ret;
     }
 }
