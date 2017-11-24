@@ -48,6 +48,7 @@ public class Server {
             for (Thread client : clients) {
                 client.interrupt();
             }
+            serverData.close();
 
             server.close();
         } catch (IOException e) {
