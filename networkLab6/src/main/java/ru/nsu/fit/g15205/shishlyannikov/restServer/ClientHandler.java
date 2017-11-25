@@ -11,6 +11,8 @@ import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ClientHandler implements Runnable {
 
@@ -70,6 +72,24 @@ public class ClientHandler implements Runnable {
                     printRequest(stringRequest, requestType, requestHeader, jsonMap);
 
                     String token;
+
+                    // тут мы проверяем, получили ли мы GET /users/*какой-то uuid*
+                    if (requestType.substring(0, 3).equals("GET")) {
+                        token = checkToken(requestHeader);
+                        if (token == null) {
+                            continue;
+                        }
+
+                        Pattern p = Pattern.compile("GET /users/.+");
+                        Matcher m = p.matcher(requestType);
+
+                        if (m.matches()) {
+                            String uuid = requestType.substring(requestType.lastIndexOf('/') + 1);
+                            sendUserInfo(token, uuid);
+                            continue;
+                        }
+                    }
+
                     switch (requestType) {
                         case "POST /login":
                             login(jsonMap);
@@ -309,6 +329,27 @@ public class ClientHandler implements Runnable {
         String responseJson = gson.toJson(responseMap, HashMap.class);
         String responseHeader = headerBuilder.buildResponseOK(responseJson.length());
         String response = responseHeader + responseJson;
+
+        try {
+            out.write(response.getBytes());
+            out.flush();
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void sendUserInfo(String token, String uuid) {
+        Map<String, String> responseMap = serverData.getUserInfo(token, uuid);
+
+        String response;
+        if (responseMap == null) {
+            response = headerBuilder.buildResponseNotFound();
+        } else {
+            String responseBody = gson.toJson(responseMap, HashMap.class);
+            String responseHeader = headerBuilder.buildResponseOK(responseBody.length());
+
+            response = responseHeader + responseBody;
+        }
 
         try {
             out.write(response.getBytes());

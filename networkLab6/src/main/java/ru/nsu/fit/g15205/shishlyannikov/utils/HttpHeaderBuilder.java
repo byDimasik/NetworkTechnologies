@@ -3,6 +3,7 @@ package ru.nsu.fit.g15205.shishlyannikov.utils;
 public class HttpHeaderBuilder {
     private final String endRow = "\r\n";
     private final String responseTypeOK = "HTTP 200 OK";
+    private final String responseTypeNotFound = "HTTP 404 Not Found";
     private final String responseTypeForbidden = "HTTP 403 Forbidden";
     private final String responseTypeUnauthorized = "HTTP 401 Unauthorized";
     private final String responseTypeBadRequest = "HTTP 400 Bad Request";
@@ -28,6 +29,11 @@ public class HttpHeaderBuilder {
 
     public String buildResponseForbidden() {
         return responseTypeForbidden + endRow +
+               responseHeaderLength + "0" + endRow + endRow;
+    }
+
+    public String buildResponseNotFound() {
+        return responseTypeNotFound + endRow +
                responseHeaderLength + "0" + endRow + endRow;
     }
 }

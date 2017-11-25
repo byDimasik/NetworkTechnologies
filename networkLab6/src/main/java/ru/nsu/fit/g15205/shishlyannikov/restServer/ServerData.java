@@ -18,8 +18,8 @@ class ServerData {
     private Map<Integer, String> messages = new ConcurrentHashMap<>();        // id    : text
     private Map<Integer, String> messagesAuthors = new ConcurrentHashMap<>(); // id    : authorUUID
 
-    private Map<String, String> timeoutClients = new ConcurrentHashMap<>();
-    private Map<String, String> logoutClients = new ConcurrentHashMap<>();
+    private Map<String, String> timeoutClients = new ConcurrentHashMap<>();   // uuid  : nickname
+    private Map<String, String> logoutClients = new ConcurrentHashMap<>();    // uuid  : nickname
 
     private int messageCounter = 0;
     private Thread timeoutChecker;
@@ -151,6 +151,47 @@ class ServerData {
         }
 
         return users;
+    }
+
+    Map<String, String> getUserInfo(String token, String uuid) {
+        Map<String, String> result = new HashMap<>();
+
+        synchronized (syncUser) {
+            clientActivity.put(token, System.currentTimeMillis());
+
+            if (!clientIDs.containsValue(uuid)) {
+                if (logoutClients.containsKey(uuid)) {
+                    result.put("online", "false");
+                    result.put("username", logoutClients.get(uuid));
+                    result.put("id", uuid);
+
+                    return result;
+                }
+                if (timeoutClients.containsKey(uuid)) {
+                    result.put("online", "null");
+                    result.put("username", timeoutClients.get(uuid));
+                    result.put("id", uuid);
+
+                    return result;
+                }
+
+                return null;
+            }
+
+            String searchToken = null;
+            for (Map.Entry<String, String> entry : clientIDs.entrySet()) {
+                if (entry.getValue().equals(uuid)) {
+                    searchToken = entry.getKey();
+                    break;
+                }
+            }
+
+            result.put("id", uuid);
+            result.put("username", clientNames.get(searchToken));
+            result.put("online", "true");
+
+            return result;
+        }
     }
 
 }
