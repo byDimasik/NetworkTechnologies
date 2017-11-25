@@ -178,7 +178,7 @@ public class MyServerSocket {
                         ex.printStackTrace();
                     }
                 } else if ((state == State.SYN_RECEIVED) && ((flags & ACK_FLAG) == ACK_FLAG) && (ackNum == sequenceNum)) {
-                    mySocket = new MySocket(receivedPacket.getAddress(), receivedPacket.getPort(), ++clientSeq);
+                    mySocket = new MySocket(receivedPacket.getAddress(), receivedPacket.getPort(), sequenceNum, ++clientSeq);
                     sockets.put(receivedPacket.getAddress() + " " + receivedPacket.getPort(), mySocket);
 
                     // получили ответ на наш syn ack, соединение установлено

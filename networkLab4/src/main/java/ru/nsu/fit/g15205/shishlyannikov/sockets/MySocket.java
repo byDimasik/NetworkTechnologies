@@ -49,9 +49,10 @@ public class MySocket {
      * @param port - порт
      * @param clientSeq - ожидаемый sequence number
      */
-    MySocket(InetAddress host, int port, int clientSeq) {
+    MySocket(InetAddress host, int port, int seq, int clientSeq) {
         destinationAddress = host;
 
+        sequenceNum = seq;
         destinationPort = port;
         expectedSeqNum = clientSeq;
         state = State.ESTABLISHED;
@@ -216,6 +217,7 @@ public class MySocket {
                     // получаем в ответ SYN ACK и отправляем свой ACK
                     sendAck(++serverSeq);
                     expectedSeqNum = serverSeq;
+                    System.out.println("Expected seq num = " + expectedSeqNum);
 
                     state = State.ESTABLISHED;
                     synchronized (obj) {
