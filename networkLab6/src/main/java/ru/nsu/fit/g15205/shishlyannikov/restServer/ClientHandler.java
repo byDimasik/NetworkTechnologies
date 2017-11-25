@@ -55,7 +55,7 @@ public class ClientHandler implements Runnable {
                     // --------------------
 
                     String stringRequest = stringBuilder.toString();
-                    String requestType = getRequestType(stringRequest);
+                    String requestType = headerParser.getHeaderType(stringRequest);
                     Map<String, String> requestHeader = headerParser.parseHTTPHeaders(stringRequest);
                     String requestBody = stringRequest.substring(stringRequest.indexOf("\r\n\r\n") + 4);
                     HashMap<String, String> jsonMap = gson.fromJson(requestBody, HashMap.class);
@@ -69,12 +69,12 @@ public class ClientHandler implements Runnable {
                         arguments = null;
                     }
 
-                    printRequest(stringRequest, requestType, requestHeader, jsonMap);
+                    //headerParser.printHttpMessage(stringRequest, requestType, requestHeader, jsonMap);
 
                     String token;
 
                     // тут мы проверяем, получили ли мы GET /users/*какой-то uuid*
-                    if (requestType.substring(0, 3).equals("GET")) {
+                    if (requestType.substring(0, 11).equals("GET /users/")) {
                         token = checkToken(requestHeader);
                         if (token == null) {
                             continue;
@@ -183,38 +183,6 @@ public class ClientHandler implements Runnable {
         return token;
     }
 
-    private void printRequest(String stringRequest, String requestType, Map<String, String> requestHeader, Map<String, String> jsonMap) {
-        System.out.println(stringRequest);
-
-        System.out.println("____________________TYPE____________________");
-        System.out.println(requestType);
-        System.out.println("____________________________________________\n");
-
-        System.out.println("___________________HEADER___________________");
-        for (Map.Entry<String, String> entry : requestHeader.entrySet()) {
-            System.out.println(entry.getKey() + " : " + entry.getValue());
-        }
-        System.out.println("____________________________________________\n");
-
-        if (jsonMap != null) {
-            System.out.println("____________________BODY____________________");
-            for (Map.Entry<String, String> entry : jsonMap.entrySet()) {
-                System.out.println(entry.getKey() + " : " + entry.getValue());
-            }
-            System.out.println("____________________________________________\n");
-        }
-
-    }
-
-    private String getRequestType(String stringRequest) {
-        // Чтоб узнать тип запроса, обрезаем первую строку, потом обрезаем версию HTTP/1.1
-        String requestType = stringRequest.substring(0, stringRequest.indexOf('\r'));
-        requestType = requestType.substring(0, requestType.lastIndexOf(' '));
-
-        return requestType;
-
-    }
-
     private void login(Map<String, String> jsonMap) {
         try {
             // пытаемся добавить клиента в нашу БД
@@ -225,9 +193,9 @@ public class ClientHandler implements Runnable {
                 String responseHeader = headerBuilder.buildResponseUnauthorized("Token realm='Username is already in use'");
                 out.write(responseHeader.getBytes());
                 out.flush();
-                System.out.println("__________________RESPONSE__________________");
-                System.out.println(responseHeader);
-                System.out.println("____________________________________________\n");
+//                System.out.println("__________________RESPONSE__________________");
+//                System.out.println(responseHeader);
+//                System.out.println("____________________________________________\n");
             }
             // если получилось - HTTP 200 OK
             else {
@@ -243,9 +211,9 @@ public class ClientHandler implements Runnable {
                 String response = responseHeader + responseJson;
                 out.write(response.getBytes());
                 out.flush();
-                System.out.println("__________________RESPONSE__________________");
-                System.out.println(response);
-                System.out.println("____________________________________________\n");
+//                System.out.println("__________________RESPONSE__________________");
+//                System.out.println(response);
+//                System.out.println("____________________________________________\n");
             }
         } catch (IOException ex) {
             ex.printStackTrace();

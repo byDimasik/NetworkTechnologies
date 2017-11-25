@@ -11,8 +11,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
-public class Server {
-    public static void main(String[] args) {
+public class Server extends Thread {
+
+    @Override
+    public void run() {
         ArrayList<Thread> clients = new ArrayList<>();
         int clientNum = 1;
         try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {

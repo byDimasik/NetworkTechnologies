@@ -38,4 +38,35 @@ public class HttpHeaderParser {
 
         return headers;
     }
+
+    public String getHeaderType(String stringRequest) {
+        // Чтоб узнать тип запроса, обрезаем первую строку, потом обрезаем версию HTTP/1.1
+        String requestType = stringRequest.substring(0, stringRequest.indexOf('\r'));
+        requestType = requestType.substring(0, requestType.lastIndexOf(' '));
+
+        return requestType;
+
+    }
+
+    public void printHttpMessage(String stringResponse, String responseType, Map<String, String> responseHeader, Map<String, String> jsonMap) {
+        System.out.println(stringResponse);
+
+        System.out.println("____________________TYPE____________________");
+        System.out.println(responseType);
+        System.out.println("____________________________________________\n");
+
+        System.out.println("___________________HEADER___________________");
+        for (Map.Entry<String, String> entry : responseHeader.entrySet()) {
+            System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
+        System.out.println("____________________________________________\n");
+
+        if (jsonMap != null) {
+            System.out.println("____________________BODY____________________");
+            for (Map.Entry<String, String> entry : jsonMap.entrySet()) {
+                System.out.println(entry.getKey() + " : " + entry.getValue());
+            }
+            System.out.println("____________________________________________\n");
+        }
+    }
 }
