@@ -217,7 +217,6 @@ public class MySocket {
                     // получаем в ответ SYN ACK и отправляем свой ACK
                     sendAck(++serverSeq);
                     expectedSeqNum = serverSeq;
-                    System.out.println("Expected seq num = " + expectedSeqNum);
 
                     state = State.ESTABLISHED;
                     synchronized (obj) {
