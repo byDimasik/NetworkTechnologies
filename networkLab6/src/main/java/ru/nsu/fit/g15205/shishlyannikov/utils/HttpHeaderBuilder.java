@@ -72,4 +72,9 @@ public class HttpHeaderBuilder {
         return requestTypeLogout + endRow +
                headerToken + token + endRow + endRow;
     }
+
+    public String buildRequestGetUsers(String token) {
+        return requestTypeGetUsers + " " + httpVersion + endRow +
+               headerToken + token + endRow + endRow;
+    }
 }

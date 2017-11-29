@@ -2,7 +2,7 @@ package ru.nsu.fit.g15205.shishlyannikov.restClient;
 
 import com.google.gson.Gson;
 import ru.nsu.fit.g15205.shishlyannikov.utils.HttpHeaderBuilder;
-import ru.nsu.fit.g15205.shishlyannikov.utils.HttpHeaderParser;
+import ru.nsu.fit.g15205.shishlyannikov.utils.HttpPacketReceiver;
 
 import java.io.*;
 import java.net.Socket;
@@ -11,11 +11,13 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Client extends Thread {
+    private final int TIMEOUT = 1000;
+
     private String token;
     private String myUUID;
     private Gson gson = new Gson();
     private HttpHeaderBuilder headerBuilder = new HttpHeaderBuilder();
-    private HttpHeaderParser headerParser = new HttpHeaderParser();
+    private HttpPacketReceiver receiver;
 
     private Socket socket;
     private DataOutputStream out;
@@ -32,20 +34,25 @@ public class Client extends Thread {
             int count = 10;
 
             while (!currentThread().isInterrupted()) {
-                ArrayList<Map<String, String>> messages = getMessages(offset, count);
+                try {
+                    ArrayList<Map<String, String>> messages = getMessages(offset, count);
 
-                if (messages.size() != 0) {
-                    // TODO сделать сообщения в правильном порядке. Начинать выводить с id == offset + 1 и так до
-                    // TODO messages.size()
-                    for (Map<String, String> message : messages) {
-                        if (myUUID.equals(message.get("author"))) {
-                            continue;
+                    if (messages.size() != 0) {
+                        for (Map<String, String> message : messages) {
+                            if (myUUID.equals(message.get("author"))) {
+                                continue;
+                            }
+                            System.out.println(getUserName(message.get("author")) + ": " + message.get("message"));
+
                         }
-                        System.out.println(getUserName(message.get("author")) + ": " + message.get("message"));
-                    }
 
-                    offset += messages.size();
+                        offset += messages.size();
+                    }
+                } catch (IOException ex) {
+                    endWork();
+                    break;
                 }
+
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ex) {
@@ -55,6 +62,18 @@ public class Client extends Thread {
         });
     }
 
+    private void endWork() {
+        try {
+            System.in.close();
+
+            socket.close();
+            out.close();
+            in.close();
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+
     @Override
     public void run() {
         try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
@@ -62,17 +81,28 @@ public class Client extends Thread {
             out = new DataOutputStream(socket.getOutputStream());
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
+            receiver = new HttpPacketReceiver(in);
 
             System.out.print("Введите имя: ");
             String username = br.readLine();
             System.out.println("Print \"/exit\" to exit");
 
-            login(username);
+            try {
+                login(username);
+            } catch (IOException ex) {
+                System.err.println("Сервер недоступен.");
+                return;
+            }
+
             messageReceiver.start();
 
             String message;
             while (true) {
-                message = br.readLine();
+                try {
+                    message = br.readLine();
+                } catch (IOException ex) {
+                    break;
+                }
                 if (message != null) {
                     if (message.equalsIgnoreCase("/exit")) {
                         logout();
@@ -82,7 +112,16 @@ public class Client extends Thread {
                         continue;
                     }
 
-                    sendMessage(message);
+                    try {
+                        if ("/list".equals(message)) {
+                            getUsers();
+                            continue;
+                        }
+
+                        sendMessage(message);
+                    } catch (IOException ex) {
+                        break;
+                    }
                 }
 
             }
@@ -94,9 +133,7 @@ public class Client extends Thread {
                 ex.printStackTrace();
             }
 
-            socket.close();
-            out.close();
-            in.close();
+            endWork();
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -105,33 +142,30 @@ public class Client extends Thread {
     /***
      * Отправляет пакет, возвращает ответ
      */
-    synchronized private String sendPacket(String packet) {
-        try {
-            out.write(packet.getBytes());
-            out.flush();
+    synchronized private String sendPacket(String packet) throws IOException {
+        out.write(packet.getBytes());
+        out.flush();
 
-            int symbol;
-            StringBuilder stringBuilder = new StringBuilder();
-
-            // ждем пока сервер ответит
-            while (!in.ready()) {
-                continue;
+        // ждем пока сервер ответит
+        long time = System.currentTimeMillis();
+        while (!in.ready()) {
+            if (System.currentTimeMillis() - time > TIMEOUT) {
+                System.err.println("Сервер помер.");
+                throw new IOException("Response receive timeout");
             }
-
-            while (in.ready()) {
-                symbol = in.read();
-                stringBuilder.append((char) symbol);
-            }
-
-            return stringBuilder.toString();
-        } catch (IOException ex) {
-            ex.printStackTrace();
+            continue;
         }
 
-        return null;
+        String response = receiver.receivePacket();
+        if (response == null) {
+            System.err.println("Сервер помер");
+            throw new IOException("Response receive error");
+        }
+
+        return response;
     }
 
-    private void login(String username) {
+    private void login(String username) throws IOException {
         Map<String, String> loginMap = new HashMap<>();
         loginMap.put("username", username);
         String loginJson = gson.toJson(loginMap, HashMap.class);
@@ -148,13 +182,13 @@ public class Client extends Thread {
         myUUID = jsonMap.get("id");
     }
 
-    private void logout() {
+    private void logout() throws IOException {
         String request = headerBuilder.buildRequestLogout(token);
 
         sendPacket(request);
     }
 
-    private void sendMessage(String message) {
+    private void sendMessage(String message) throws IOException {
         Map<String, String> requestMap = new HashMap<>();
         requestMap.put("message", message);
 
@@ -162,22 +196,37 @@ public class Client extends Thread {
         String requestHeader = headerBuilder.buildRequestSendMessage(token, requestJson.length());
         String request = requestHeader + requestJson;
 
-        String response = sendPacket(request);
-
+        sendPacket(request);
     }
 
-    private ArrayList<Map<String, String>> getMessages(int offset, int count) {
+    private void getUsers() throws IOException {
+        String request = headerBuilder.buildRequestGetUsers(token);
+
+        String response = sendPacket(request);
+        String responseBody = response.substring(response.indexOf("\r\n\r\n") + 4);
+        HashMap<String, ArrayList<Map<String, String>>> jsonMap = gson.fromJson(responseBody, HashMap.class);
+
+        String userList = "Online users:\n";
+
+        for (Map<String, String> userInfo : jsonMap.get("users")) {
+            userList += "\t" + userInfo.get("username") + "\n";
+        }
+
+        System.out.println(userList);
+    }
+
+    private ArrayList<Map<String, String>> getMessages(int offset, int count) throws IOException {
         String request = headerBuilder.buildRequestGetMessages(token, offset, count);
 
         String response = sendPacket(request);
-
         String responseBody = response.substring(response.indexOf("\r\n\r\n") + 4);
         HashMap<String, ArrayList<Map<String, String>>> jsonMap = gson.fromJson(responseBody, HashMap.class);
 
         return jsonMap.get("messages");
+
     }
 
-    private String getUserName(String uuid) {
+    private String getUserName(String uuid) throws IOException {
         String request = headerBuilder.buildRequestGetUser(token, uuid);
 
         String response = sendPacket(request);

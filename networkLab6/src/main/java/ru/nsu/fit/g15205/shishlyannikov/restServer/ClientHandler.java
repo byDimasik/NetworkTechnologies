@@ -3,6 +3,7 @@ package ru.nsu.fit.g15205.shishlyannikov.restServer;
 import com.google.gson.Gson;
 import ru.nsu.fit.g15205.shishlyannikov.utils.HttpHeaderBuilder;
 import ru.nsu.fit.g15205.shishlyannikov.utils.HttpHeaderParser;
+import ru.nsu.fit.g15205.shishlyannikov.utils.HttpPacketReceiver;
 
 import java.io.*;
 import java.net.Socket;
@@ -19,6 +20,7 @@ public class ClientHandler implements Runnable {
     private Socket clientSocket;
     private ServerData serverData;
     private DataOutputStream out;
+    private BufferedReader in;
 
     private HttpHeaderParser headerParser = new HttpHeaderParser();
     private HttpHeaderBuilder headerBuilder = new HttpHeaderBuilder();
@@ -28,7 +30,7 @@ public class ClientHandler implements Runnable {
         clientSocket = client;
         serverData = data;
         try {
-            clientSocket.setSoTimeout(300);
+            clientSocket.setSoTimeout(1000);
         } catch (SocketException ex) {
             ex.printStackTrace();
         }
@@ -38,27 +40,29 @@ public class ClientHandler implements Runnable {
     public void run() {
         try {
             out = new DataOutputStream(clientSocket.getOutputStream());
-            BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+
+            HttpPacketReceiver receiver = new HttpPacketReceiver(in);
 
             while (!clientSocket.isClosed() && !Thread.currentThread().isInterrupted()) {
                 try {
-                    // Получаем http запрос
-                    int symbol;
-                    StringBuilder stringBuilder = new StringBuilder();
-                    while (in.ready()) {
-                        symbol = in.read();
-                        stringBuilder.append((char) symbol);
-                    }
-                    if (stringBuilder.toString().equals("")) {
+                    String requestHeader = receiver.receiveHeader();
+                    if (requestHeader == null) {
                         continue;
                     }
-                    // --------------------
 
-                    String stringRequest = stringBuilder.toString();
-                    String requestType = headerParser.getHeaderType(stringRequest);
-                    Map<String, String> requestHeader = headerParser.parseHTTPHeaders(stringRequest);
-                    String requestBody = stringRequest.substring(stringRequest.indexOf("\r\n\r\n") + 4);
-                    HashMap<String, String> jsonMap = gson.fromJson(requestBody, HashMap.class);
+                    String requestType = headerParser.getHeaderType(requestHeader);
+                    Map<String, String> requestHeaderMap = headerParser.parseHTTPHeaders(requestHeader);
+
+                    String requestBody;
+                    HashMap<String, String> jsonMap = null;
+                    if (!requestType.substring(0, 3).equals("GET")) {
+                        requestBody = receiver.receiveBody(requestHeaderMap);
+                        if (requestBody == null) {
+                            continue;
+                        }
+                        jsonMap = gson.fromJson(requestBody, HashMap.class);
+                    }
 
                     Map<String, String> arguments = new HashMap<>();
                     String tmp = checkArguments(requestType, arguments);
@@ -74,8 +78,8 @@ public class ClientHandler implements Runnable {
                     String token;
 
                     // тут мы проверяем, получили ли мы GET /users/*какой-то uuid*
-                    if (requestType.substring(0, 11).equals("GET /users/")) {
-                        token = checkToken(requestHeader);
+                    if (requestType.substring(0, 10).equals("GET /users")) {
+                        token = checkToken(requestHeaderMap);
                         if (token == null) {
                             continue;
                         }
@@ -95,28 +99,28 @@ public class ClientHandler implements Runnable {
                             login(jsonMap);
                             break;
                         case "GET /logout":
-                            token = checkToken(requestHeader);
+                            token = checkToken(requestHeaderMap);
                             if (token == null) {
                                 break;
                             }
                             logout(token);
                             break;
                         case "POST /messages":
-                            token = checkToken(requestHeader);
+                            token = checkToken(requestHeaderMap);
                             if (token == null) {
                                 break;
                             }
                             addMessage(token, jsonMap);
                             break;
                         case "GET /messages":
-                            token = checkToken(requestHeader);
+                            token = checkToken(requestHeaderMap);
                             if (token == null) {
                                 break;
                             }
                             sendMessages(token, arguments);
                             break;
                         case "GET /users":
-                            token = checkToken(requestHeader);
+                            token = checkToken(requestHeaderMap);
                             if (token == null) {
                                 break;
                             }
@@ -193,9 +197,6 @@ public class ClientHandler implements Runnable {
                 String responseHeader = headerBuilder.buildResponseUnauthorized("Token realm='Username is already in use'");
                 out.write(responseHeader.getBytes());
                 out.flush();
-//                System.out.println("__________________RESPONSE__________________");
-//                System.out.println(responseHeader);
-//                System.out.println("____________________________________________\n");
             }
             // если получилось - HTTP 200 OK
             else {
@@ -211,9 +212,6 @@ public class ClientHandler implements Runnable {
                 String response = responseHeader + responseJson;
                 out.write(response.getBytes());
                 out.flush();
-//                System.out.println("__________________RESPONSE__________________");
-//                System.out.println(response);
-//                System.out.println("____________________________________________\n");
             }
         } catch (IOException ex) {
             ex.printStackTrace();
