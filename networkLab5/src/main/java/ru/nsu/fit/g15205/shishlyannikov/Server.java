@@ -302,18 +302,22 @@ public class Server extends Thread {
             index = received_num;
         }
 
-        ByteBuffer buffer = ByteBuffer.allocate(1);
+        ByteBuffer buffer = ByteBuffer.allocate(need - received_num);
 
+        need = need - received_num;
         int num;
 
-        // в цикле получаем по одному байту и записываем в ret, пока не получим сколько нам нужно
-        while (index != ret.length) {
+        // в цикле получаем, пока не получим сколько нам нужно
+        while (index < ret.length) {
             try {
                 num = clientChannel.read(buffer);
-                if (num == 1) {
-                    ret[index] = buffer.array()[0];
+                for (int i = 0; i < num; i++) {
+                    ret[index] = buffer.array()[i];
                     index++;
-                    buffer.clear();
+                }
+                if (num != need) {
+                    need -= num;
+                    buffer = ByteBuffer.allocate(need);
                 }
             } catch (IOException ex) {
                 num = -1;
