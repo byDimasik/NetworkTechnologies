@@ -15,15 +15,15 @@ import com.google.gson.Gson;
 class Server {
 
     private HttpServer httpServer;
-    private ConcurrentHashMap<String,String> userNames = new ConcurrentHashMap<>();     //token = username
-    private ConcurrentHashMap<String,Integer> usersIds = new ConcurrentHashMap<>();     //token = userId
-    private ConcurrentHashMap<String,Long> usersActivity = new ConcurrentHashMap<>();   //token = time
+    private ConcurrentHashMap<String, String> userNames = new ConcurrentHashMap<>();     //token = username
+    private ConcurrentHashMap<String, Integer> usersIds = new ConcurrentHashMap<>();     //token = userId
+    private ConcurrentHashMap<String, Long> usersActivity = new ConcurrentHashMap<>();   //token = time
 
-    private ConcurrentHashMap<Integer,String> logoutUsers = new ConcurrentHashMap<>();  //userId = username
-    private ConcurrentHashMap<Integer,String> timeOutUsers = new ConcurrentHashMap<>(); //userId = username
+    private ConcurrentHashMap<Integer, String> logoutUsers = new ConcurrentHashMap<>();  //userId = username
+    private ConcurrentHashMap<Integer, String> timeOutUsers = new ConcurrentHashMap<>(); //userId = username
 
-    private ConcurrentHashMap<Integer,String> messages = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Integer,Integer> senders = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Integer, String> messages = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Integer, Integer> senders = new ConcurrentHashMap<>();
 
     private int userId = 0;
     private int messageId = 0;

@@ -2,11 +2,9 @@ package ru.nsu.fit.g15205.shishlyannikov;
 
 import java.io.IOException;
 
-public class App
-{
-    public static void main( String[] args )
-    {
-        switch (args[0]){
+public class App {
+    public static void main( String[] args ) {
+        switch (args[0]) {
             case "s":
                 try {
                     new Server();

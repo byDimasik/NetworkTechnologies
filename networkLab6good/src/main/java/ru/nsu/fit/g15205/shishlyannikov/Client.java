@@ -29,7 +29,7 @@ class Client {
     private Thread getter;
     private Thread printer;
 
-    Client(String url) throws IOException {
+    Client(String url) {
         this.url = url;
         tryToLogin();
         System.out.println("Print \"/logout\" to exit");
@@ -118,7 +118,7 @@ class Client {
                     String msg = queue.take();
                     if (msg != null) System.out.println(msg);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    break;
                 }
             }
         }
