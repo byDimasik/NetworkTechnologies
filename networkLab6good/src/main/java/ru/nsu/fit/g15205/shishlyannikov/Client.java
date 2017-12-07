@@ -12,6 +12,9 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 class Client {
     private String url;
@@ -144,10 +147,10 @@ class Client {
             case 200:
                 byte[] bytes = urlConnection.getInputStream().readAllBytes();
                 String resp = new String(bytes, "UTF-8");
-                HashMap<String,String> json = gson.fromJson(resp, HashMap.class);
-                username = json.get("username");
-                token = json.get("token");
-                id = Integer.valueOf(json.get("id"));
+                JsonObject json = gson.fromJson(resp, JsonObject.class);
+                username = json.get("username").getAsString();
+                token = json.get("token").getAsString();
+                id = json.get("id").getAsInt();
                 break;
             case 401:
                 System.out.println("This username is already in use");
@@ -157,7 +160,7 @@ class Client {
         return respCode;
     }
 
-    private boolean tryToLogin(){
+    private boolean tryToLogin() {
         String name;
         System.out.print("Enter your username: ");
         scanner = new Scanner(System.in, "UTF-8");
@@ -192,14 +195,15 @@ class Client {
         if (responseCode == 200) {
             String resp = new String(urlConnection.getInputStream().readAllBytes(), "UTF-8");
             Gson gson = new Gson();
-            HashMap<String, ArrayList<HashMap<String, String>>> hashMap = gson.fromJson(resp, HashMap.class);
-            ArrayList<HashMap<String, String>> list = hashMap.get("users");
+            JsonObject hashMap = gson.fromJson(resp, JsonObject.class);
+            JsonArray list = hashMap.get("users").getAsJsonArray();
 
             HashMap<Integer,String> fresh = new HashMap<>();
-            for (Map<String,String> map : list) {
-                fresh.put(Integer.valueOf(map.get("id")), map.get("username"));
-                if (!onlineUsers.containsKey(Integer.valueOf(map.get("id")))){
-                    usersStatus.put(map.get("username"), "online");
+            for (JsonElement elem : list) {
+                JsonObject map = elem.getAsJsonObject();
+                fresh.put(map.get("id").getAsInt(), map.get("username").getAsString());
+                if (!onlineUsers.containsKey(map.get("id").getAsInt())) {
+                    usersStatus.put(map.get("username").getAsString(), "online");
                 }
             }
 
@@ -222,11 +226,11 @@ class Client {
         if (responseCode == 200) {
             String resp = new String(urlConnection.getInputStream().readAllBytes(), "UTF-8");
             Gson gson = new Gson();
-            HashMap<String, String> hashMap = gson.fromJson(resp, HashMap.class);
-            name = hashMap.get("username");
-            if ((!"true".equals(hashMap.get("online"))) && onlineUsers.containsKey(userID)) {
+            JsonObject hashMap = gson.fromJson(resp, JsonObject.class);
+            name = hashMap.get("username").getAsString();
+            if ((!"true".equals(hashMap.get("online").getAsString())) && onlineUsers.containsKey(userID)) {
                 onlineUsers.remove(userID);
-                if ("false".equals(hashMap.get("online"))) {
+                if ("false".equals(hashMap.get("online").getAsString())) {
                     usersStatus.put(name, "offline");
                 } else {
                     usersStatus.put(name, "timeout");
@@ -242,7 +246,7 @@ class Client {
         URL urlMessages= new URL(url + "messages");
         HttpURLConnection urlConnection = connection(urlMessages,"POST","JT");
         HashMap<String,String> req = new HashMap<>();
-        req.put("message",msg);
+        req.put("message", msg);
         Gson gson = new Gson();
         String request = gson.toJson(req);
         try (OutputStream out = urlConnection.getOutputStream()){
@@ -270,17 +274,18 @@ class Client {
         if (responseCode == 200) {
             String resp = new String(urlConnection.getInputStream().readAllBytes(), "UTF-8");
             Gson gson = new Gson();
-            HashMap<String, ArrayList<HashMap<String, String>>> hashMap = gson.fromJson(resp, HashMap.class);
-            ArrayList<HashMap<String, String>> list = hashMap.get("messages");
+            JsonObject hashMap = gson.fromJson(resp, JsonObject.class);
+            JsonArray list = hashMap.get("messages").getAsJsonArray();
             if (list.size() == 0) {
                 return quantity;
             }
             quantity = list.size();
-            for (Map<String,String> map : list) {
-                int author = Integer.valueOf(map.get("author"));
-                if (author != id){
+            for (JsonElement elem : list) {
+                JsonObject map = elem.getAsJsonObject();
+                int author = map.get("author").getAsInt();
+                if (author != id) {
                     try {
-                        queue.put(users(author) + ": " + map.get("message"));
+                        queue.put(users(author) + ": " + map.get("message").getAsString());
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }

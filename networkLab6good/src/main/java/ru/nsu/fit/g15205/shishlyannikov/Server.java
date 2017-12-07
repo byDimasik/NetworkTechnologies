@@ -1,5 +1,7 @@
 package ru.nsu.fit.g15205.shishlyannikov;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -81,8 +83,8 @@ class Server {
             try {
                 String body = new String(exchange.getRequestBody().readAllBytes(), "UTF-8");
                 Gson gson = new Gson();
-                HashMap<String, String> hashMap = gson.fromJson(body, HashMap.class);
-                String name = hashMap.get("username");
+                JsonObject hashMap = gson.fromJson(body, JsonObject.class);
+                String name = hashMap.get("username").getAsString();
 
                 if ((name == null) || (hashMap.size() != 1)) {
                     exchange.sendResponseHeaders(400, 0);
@@ -101,13 +103,17 @@ class Server {
                     usersIds.put(token, userId++);
                     usersActivity.put(token, System.currentTimeMillis());
 
-                    HashMap<String, String> response = new HashMap<>();
-                    response.put("id", String.valueOf(userId - 1));
-                    response.put("username", name);
-                    response.put("online", "true");
-                    response.put("token", token);
-                    String resp = gson.toJson(response, HashMap.class);
+                    JsonObject response = new JsonObject();
+                    response.addProperty("id", userId - 1);
+                    response.addProperty("username", name);
+                    response.addProperty("online", true);
+                    response.addProperty("token", token);
+                    String resp = gson.toJson(response, JsonObject.class);
 
+                    Headers headers = exchange.getResponseHeaders();
+                    ArrayList<String> list = new ArrayList<>();
+                    list.add("application/json");
+                    headers.put("Content-Type", list);
                     exchange.sendResponseHeaders(200, resp.getBytes("UTF-8").length);
                     try (OutputStream os = exchange.getResponseBody()) {
                         os.write(resp.getBytes("UTF-8"));
@@ -126,6 +132,7 @@ class Server {
             try {
                 Headers headers = exchange.getRequestHeaders();
                 String token = getToken(headers);
+                headers = exchange.getResponseHeaders();
 
                 if (userNames.containsKey(token)) {
                     logoutUsers.put(usersIds.remove(token), userNames.remove(token));
@@ -134,8 +141,8 @@ class Server {
                     ArrayList<String> list = new ArrayList<>();
                     list.add("application/json");
                     headers.put("Content-Type", list);
-                    HashMap<String, String> response = new HashMap<>();
-                    response.put("message", "bye!");
+                    JsonObject response = new JsonObject();
+                    response.addProperty("message", "bye!");
                     Gson gson = new Gson();
                     String resp = gson.toJson(response);
 
@@ -160,24 +167,25 @@ class Server {
             try {
                 Headers headers = exchange.getRequestHeaders();
                 String token = getToken(headers);
+                headers = exchange.getResponseHeaders();
 
                 if (userNames.containsKey(token)) {
                     usersActivity.put(token, System.currentTimeMillis());
                     String path = exchange.getRequestURI().getPath();
 
                     if (path.equals("/users")) {
-                        HashMap<String, ArrayList<HashMap<String, String>>> response = new HashMap<>();
-                        ArrayList<HashMap<String, String>> list = new ArrayList<>();
+                        JsonObject response = new JsonObject();
+                        JsonArray list = new JsonArray();
 
                         for (Map.Entry<String, String> entry : userNames.entrySet()) {
                             String t = entry.getKey();
-                            HashMap<String, String> hashMap = new HashMap<>();
-                            hashMap.put("id", String.valueOf(usersIds.get(t)));
-                            hashMap.put("username", userNames.get(t));
-                            hashMap.put("online", "true");
+                            JsonObject hashMap = new JsonObject();
+                            hashMap.addProperty("id", usersIds.get(t));
+                            hashMap.addProperty("username", userNames.get(t));
+                            hashMap.addProperty("online", true);
                             list.add(hashMap);
                         }
-                        response.put("users", list);
+                        response.add("users", list);
 
                         ArrayList<String> l = new ArrayList<>();
                         l.add("application/json");
@@ -198,12 +206,12 @@ class Server {
                                 ArrayList<String> l = new ArrayList<>();
                                 l.add("application/json");
                                 headers.put("Content-Type", l);
-                                HashMap<String, String> hashMap = new HashMap<>();
-                                hashMap.put("id", String.valueOf(id));
+                                JsonObject hashMap = new JsonObject();
+                                hashMap.addProperty("id", id);
 
                                 if (logoutUsers.containsKey(id) || timeOutUsers.containsKey(id)) {
-                                    hashMap.put("username", logoutUsers.containsKey(id) ? logoutUsers.get(id) : timeOutUsers.get(id));
-                                    hashMap.put("online", logoutUsers.containsKey(id) ? "false" : "null");
+                                    hashMap.addProperty("username", logoutUsers.containsKey(id) ? logoutUsers.get(id) : timeOutUsers.get(id));
+                                    hashMap.addProperty("online", logoutUsers.containsKey(id) ? false : null);
                                 } else {
                                     // ищем токен по айди
                                     String t = "";
@@ -213,8 +221,8 @@ class Server {
                                             break;
                                         }
                                     }
-                                    hashMap.put("username", userNames.get(t));
-                                    hashMap.put("online", "true");
+                                    hashMap.addProperty("username", userNames.get(t));
+                                    hashMap.addProperty("online", true);
                                 }
                                 Gson gson = new Gson();
                                 String resp = gson.toJson(hashMap);
@@ -253,6 +261,7 @@ class Server {
             try {
                 Headers headers = exchange.getRequestHeaders();
                 String token = getToken(headers);
+                headers = exchange.getResponseHeaders();
 
                 if (userNames.containsKey(token)) {
                     usersActivity.put(token, System.currentTimeMillis());
@@ -262,8 +271,8 @@ class Server {
                         case "POST":
                             String body = new String(exchange.getRequestBody().readAllBytes(), "UTF-8");
                             Gson gson = new Gson();
-                            HashMap<String, String> hashMap = gson.fromJson(body, HashMap.class);
-                            String message = hashMap.get("message");
+                            JsonObject hashMap = gson.fromJson(body, JsonObject.class);
+                            String message = hashMap.get("message").getAsString();
 
                             if ((message == null) || (hashMap.size() != 1)) {
                                 exchange.sendResponseHeaders(400, 0);
@@ -271,9 +280,9 @@ class Server {
                             } else {
                                 senders.put(messageId, usersIds.get(token));
                                 messages.put(messageId++, message);
-                                HashMap<String, String> response = new HashMap<>();
-                                response.put("id", String.valueOf(usersIds.get(token)));
-                                response.put("message", message);
+                                JsonObject response = new JsonObject();
+                                response.addProperty("id", usersIds.get(token));
+                                response.addProperty("message", message);
                                 String resp = gson.toJson(response);
 
                                 exchange.sendResponseHeaders(200, resp.getBytes("UTF-8").length);
@@ -294,21 +303,22 @@ class Server {
                                 int offset = result.get("offset");
                                 int count = result.get("count");
 
-                                HashMap<String, ArrayList<HashMap<String, String>>> response = new HashMap<>();
-                                ArrayList<HashMap<String, String>> list = new ArrayList<>();
+                                JsonObject response = new JsonObject();
+                                JsonArray list = new JsonArray();
                                 int i = 0;
                                 for (Map.Entry<Integer, String> entry : messages.entrySet()) {
                                     if (i++ < offset) continue;
                                     if (i - offset - 1 > count) break;
 
                                     int mid = entry.getKey();
-                                    HashMap<String, String> map = new HashMap<>();
-                                    map.put("id", String.valueOf(mid));
-                                    map.put("message", entry.getValue());
-                                    map.put("author", String.valueOf(senders.get(mid)));
+                                    JsonObject map = new JsonObject();
+                                    map.addProperty("id", mid);
+                                    map.addProperty("message", entry.getValue());
+                                    map.addProperty("author", senders.get(mid));
                                     list.add(map);
                                 }
-                                response.put("messages", list);
+                                response.add("messages", list);
+
                                 ArrayList<String> l = new ArrayList<>();
                                 l.add("application/json");
                                 headers.put("Content-Type", l);

@@ -14,11 +14,8 @@ public class App {
                 break;
             case "c":
                 String str = "http://localhost:1111/";
-                try {
-                    new Client(str);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                new Client(str);
+
         }
     }
 }
