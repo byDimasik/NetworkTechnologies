@@ -285,6 +285,9 @@ class Server {
                                 response.addProperty("message", message);
                                 String resp = gson.toJson(response);
 
+                                ArrayList<String> l = new ArrayList<>();
+                                l.add("application/json");
+                                headers.put("Content-Type", l);
                                 exchange.sendResponseHeaders(200, resp.getBytes("UTF-8").length);
                                 try (OutputStream os = exchange.getResponseBody()) {
                                     os.write(resp.getBytes("UTF-8"));
