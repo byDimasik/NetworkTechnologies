@@ -54,7 +54,7 @@ class Server {
 
     Server() throws IOException {
         httpServer = HttpServer.create();
-        httpServer.bind(new InetSocketAddress(1111),0);
+        httpServer.bind(new InetSocketAddress("192.168.1.172", 1111),0);
         httpServer.createContext("/login", new LoginHandler());
         httpServer.createContext("/logout", new LogoutHandler());
         httpServer.createContext("/users", new UsersHandler());
@@ -211,7 +211,11 @@ class Server {
 
                                 if (logoutUsers.containsKey(id) || timeOutUsers.containsKey(id)) {
                                     hashMap.addProperty("username", logoutUsers.containsKey(id) ? logoutUsers.get(id) : timeOutUsers.get(id));
-                                    hashMap.addProperty("online", logoutUsers.containsKey(id) ? false : null);
+                                    if (logoutUsers.containsKey(id)) {
+                                        hashMap.addProperty("online", false);
+                                    } else {
+                                        hashMap.addProperty("online", "null");
+                                    }
                                 } else {
                                     // ищем токен по айди
                                     String t = "";
@@ -281,7 +285,7 @@ class Server {
                                 senders.put(messageId, usersIds.get(token));
                                 messages.put(messageId++, message);
                                 JsonObject response = new JsonObject();
-                                response.addProperty("id", usersIds.get(token));
+                                response.addProperty("id", messageId - 1);
                                 response.addProperty("message", message);
                                 String resp = gson.toJson(response);
 

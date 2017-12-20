@@ -228,6 +228,7 @@ class Client {
             Gson gson = new Gson();
             JsonObject hashMap = gson.fromJson(resp, JsonObject.class);
             name = hashMap.get("username").getAsString();
+            //System.out.println("ONLINE " + hashMap.get("online"));
             if ((!"true".equals(hashMap.get("online").getAsString())) && onlineUsers.containsKey(userID)) {
                 onlineUsers.remove(userID);
                 if ("false".equals(hashMap.get("online").getAsString())) {
