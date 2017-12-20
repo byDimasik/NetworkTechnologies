@@ -203,11 +203,11 @@ int main(int argc, char** argv) {
 
         int maxSocket = countMaxSocket(mySocket, clientSockets, serverSockets, numConnectedClients);
 
-	struct timeval timeout = {.tv_sec=10, .tv_usec=0};
+	    struct timeval timeout = {.tv_sec=10, .tv_usec=0};
         int rc = select(maxSocket + 1, &inputSockets, &outputSockets, NULL, &timeout);
-	if (-1 == rc || 0 == rc) {
-	    continue;
-	}
+		if (-1 == rc || 0 == rc) {
+	    	continue;
+		}
 
         for (i = 0; i < numConnectedClients; i++) {
             if (FD_ISSET(clientSockets[i], &inputSockets) && FD_ISSET(serverSockets[i], &outputSockets)) {
