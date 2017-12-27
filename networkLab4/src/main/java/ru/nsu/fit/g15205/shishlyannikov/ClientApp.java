@@ -12,36 +12,30 @@ public class ClientApp {
     public static void main( String[] args )
     {
         try {
-            FileInputStream inputStream = new FileInputStream("test.jpg");
             MySocket socket = new MySocket("localhost", 1111);
 
+            byte[] hello = new byte[10];
+            int num;
+
+            num = socket.receive(hello, 1000);
+            if (num > 0) {
+                System.out.println(new String(hello, 0 , num));
+            }
+
+            FileInputStream inputStream = new FileInputStream("test3.jopa");
             byte[] buffer = new byte[10000];
             int fileSize = 0;
-            int num;
             while ((num = inputStream.read(buffer)) > 0) {
                 fileSize+=num;
                 byte tmp[] = new byte[num];
-                for (int i = 0; i < num; i++) {
-                    tmp[i] = buffer[i];
-                }
+                System.arraycopy(buffer, 0, tmp, 0, num);
                 socket.send(tmp);
             }
             inputStream.close();
-            System.out.println("sent " + fileSize + " bytes");
+            System.out.println("sent " + socket.count + " bytes");
 
-            // тк сервер из receive выйдет только через 2 секунды после нашего последнего send, нужно дать ему время
-            // успеть отправить сообщение нам, потому что наш receive тоже через 2 секунды вырубится, и если сервер
-            // не успеет отправить, мы не сможем ничего принять, для этого засыпаем на 5 секунд (чтоб с запасом)
-            // несмотря на большой sleep лично у меня на компьютере при тестах сервер иногда не успевал все принять
-            // но это нормально. Изящным решением будет добавить возможность устанавливать timeout в receive, но этого
-            // нет в ТЗ, и вообще к лабе не относится, а уже красявости
-            Thread.sleep(5000);
-            num = socket.receive(buffer);
-            if (num > 0) {
-                System.out.println("SERVER: " + new String(buffer).substring(0, num));
-            }
             socket.close();
-        } catch (IOException | InterruptedException ex) {
+        } catch (IOException ex) {
             ex.printStackTrace();
         }
 

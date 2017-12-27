@@ -15,18 +15,18 @@ public class ServerApp {
         try {
             MyServerSocket serverSocket = new MyServerSocket(1111);
             MySocket socket = serverSocket.accept();
+            socket.send("Hello!".getBytes());
 
-            FileOutputStream outputStream = new FileOutputStream("recv.jpg");
+            FileOutputStream outputStream = new FileOutputStream("recv.jopa");
             byte[] buffer = new byte[20000];
             int fileSize = 0;
             int size;
-            while ((size = socket.receive(buffer)) > 0) {
+            while ((size = socket.receive(buffer, 5000)) != -1) {
                 outputStream.write(buffer, 0, size);
                 fileSize += size;
             }
             outputStream.close();
             System.out.println("received " + fileSize + " bytes");
-            socket.send("Good bye!".getBytes());
 
             socket.close();
 

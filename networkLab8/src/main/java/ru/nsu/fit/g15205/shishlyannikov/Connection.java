@@ -3,7 +3,6 @@ package ru.nsu.fit.g15205.shishlyannikov;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
 
 public class Connection {
     private static int idCounter = 1;

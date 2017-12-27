@@ -13,8 +13,8 @@ public class App {
                 }
                 break;
             case "c":
-                String str = "http://192.168.1.172:1111/";
-                //String str = "http://172.16.17.82:1111/";
+                String str = "http://192.168.1.81:7997/";
+//                String str = "http://192.168.1.172:1111/";
                 new Client(str);
 
         }

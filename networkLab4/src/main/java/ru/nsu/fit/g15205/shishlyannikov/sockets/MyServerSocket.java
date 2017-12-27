@@ -55,6 +55,8 @@ public class MyServerSocket {
                     int ackNum = data.getInt();
                     byte flags = data.get();
 
+                    int saveSeq = seq;
+
                     // если с клиентом уже работаем
                     if (sockets.containsKey(clientName)) {
                         // на акк удаляем у сокета соответствующий пакет
@@ -86,7 +88,7 @@ public class MyServerSocket {
                             sockets.get(clientName).sendFinAck(++seq);
                         }
 
-                        sockets.get(clientName).addPacket(receivedPacket); // пихаем в очередь сокету
+                        sockets.get(clientName).addPacket(receivedPacket, saveSeq); // пихаем в очередь сокету
 
                         continue;
                     }
@@ -104,6 +106,7 @@ public class MyServerSocket {
         });
         sender = new Thread(() -> {
             while (!Thread.interrupted()) {
+                long curTime = System.currentTimeMillis();
                 try {
                     for (Map.Entry<String, MySocket> entry : sockets.entrySet()) {
                         // удаляем закрытые сокеты
@@ -125,6 +128,13 @@ public class MyServerSocket {
 
                         for (DatagramPacket packet : forSend) {
                             datagramSocket.send(packet);
+                        }
+
+                        if (System.currentTimeMillis() - curTime > 1000) {
+                            curTime = System.currentTimeMillis();
+                            for (DatagramPacket packet : entry.getValue().getPacketsWithoutAcks()) {
+                                datagramSocket.send(packet);
+                            }
                         }
                     }
                 } catch (IOException ex) {

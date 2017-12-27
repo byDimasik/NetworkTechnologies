@@ -22,14 +22,16 @@ public class MySocket {
 
     private DatagramSocket datagramSocket = null;
     private BlockingQueue<DatagramPacket> inPackets = new LinkedBlockingDeque<>(); // входящие пакеты
+    private BlockingQueue<DatagramPacket> outPackets = new LinkedBlockingDeque<>(); // входящие пакеты
     //мапа с исходящими пакетами, ключ - номер ака, который должен прийти на этот пакет
-    private ConcurrentHashMap<Integer, DatagramPacket> outPackets = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Integer, DatagramPacket> againPackets = new ConcurrentHashMap<>();
     //аки, которые нужно отправить
     private BlockingQueue<DatagramPacket> acks = new LinkedBlockingDeque<>();
     private ConcurrentHashMap<Integer, DatagramPacket> unexpectedPackets = new ConcurrentHashMap<>();
 
     private int sequenceNum = 1; // наш sequence number
     private int expectedSeqNum;  // ожидаемый sequence number
+    private int test;
 
     private int destinationPort;
     private InetAddress destinationAddress;
@@ -55,6 +57,7 @@ public class MySocket {
         sequenceNum = seq;
         destinationPort = port;
         expectedSeqNum = clientSeq;
+        test = expectedSeqNum;
         state = State.ESTABLISHED;
     }
 
@@ -65,7 +68,7 @@ public class MySocket {
      */
     public MySocket(String host, int port) throws SocketException {
         datagramSocket = new DatagramSocket();
-        datagramSocket.setSoTimeout(1000);
+        datagramSocket.setSoTimeout(2000);
 
         this.destinationPort = port;
 
@@ -77,8 +80,9 @@ public class MySocket {
 
         // этот поток отправляет сообщения из акки из очередей для отправки
         sender = new Thread(() -> {
+            long curTime = System.currentTimeMillis();
             // работаем, пока не нужно завершаться и пока есть, на что получить акки
-            while (state != State.FIN || !outPackets.isEmpty()) {
+            while (state != State.FIN || !outPackets.isEmpty() || !againPackets.isEmpty()) {
                 try {
                     ArrayList<DatagramPacket> acksForSend = getAcksForSend();
 
@@ -90,6 +94,13 @@ public class MySocket {
 
                     for (DatagramPacket packet : forSend) {
                         datagramSocket.send(packet);
+                    }
+
+                    if (System.currentTimeMillis() - curTime > 1000) {
+                        curTime = System.currentTimeMillis();
+                        for (DatagramPacket packet : againPackets.values()) {
+                            datagramSocket.send(packet);
+                        }
                     }
                 } catch (IOException ex) {
                     ex.printStackTrace();
@@ -110,7 +121,7 @@ public class MySocket {
             }
 
             // работаем, пока сокет не закроют, а потом пока не отправим все пакеты и не дождемся на них акков
-            while (state != State.FIN || !outPackets.isEmpty() || sender.isAlive()) {
+            while (state != State.FIN || !outPackets.isEmpty() || !againPackets.isEmpty() || sender.isAlive()) {
                 try {
                     byte[] buffer = new byte[MAX_PACKET_SIZE];
                     DatagramPacket receivedPacket = new DatagramPacket(buffer, buffer.length);
@@ -144,18 +155,11 @@ public class MySocket {
                         }
                         continue;
                     }
-
                     // ждем следующий пакет
                     expectedSeqNum++;
 
                     // в любом другом случае отправляем акк на пришедший пакет
                     sendAck(++seq);
-
-                    // если пришел флаг разорвать соединение, переходим в состояние завершения
-                    if ((flags & RST_FLAG) == RST_FLAG) {
-                        setFinState();
-                        continue;
-                    }
 
                     inPackets.add(receivedPacket);
                 } catch (SocketTimeoutException ex) {
@@ -217,6 +221,7 @@ public class MySocket {
                     // получаем в ответ SYN ACK и отправляем свой ACK
                     sendAck(++serverSeq);
                     expectedSeqNum = serverSeq;
+                    test = expectedSeqNum - 1;
 
                     state = State.ESTABLISHED;
                     synchronized (obj) {
@@ -271,8 +276,13 @@ public class MySocket {
      * Добавить входящий пакет
      * @param packet - пакет
      */
-    void addPacket(DatagramPacket packet) {
-        inPackets.add(packet);
+    void addPacket(DatagramPacket packet, int seq) {
+        if (packet != null) {
+            if (unexpectedPackets.containsKey(seq)) {
+                return;
+            }
+            inPackets.add(packet);
+        }
     }
 
     /***
@@ -280,8 +290,15 @@ public class MySocket {
      * @param buffer и кладем их сюда
      * @return возвращаем количество считанных байт, если больше 2 секунд тут висим, возвращаем ошибку -1
      */
-    public int receive(byte[] buffer) {
+    public int receive(byte[] buffer, int timeout) {
+        if (state == State.FIN) {
+            return -1;
+        }
+
         int ret = 0;
+        if (timeout <= 0) {
+            timeout = 1000;
+        }
 
         // если есть что-то, что мы не выдали в прошлые вызовы receive
         if (outData != null) {
@@ -309,20 +326,15 @@ public class MySocket {
         while (ret < buffer.length) {
             try {
                 DatagramPacket packet = null;
-                for (int i = 0; i < 3; i++) {
-                    if (inPackets.isEmpty()) { // если очередь пустая, ищем следующий пакет в списке нежданых
-                        if (unexpectedPackets.containsKey(expectedSeqNum)) {
-                            addPacket(unexpectedPackets.get(expectedSeqNum));
-                            unexpectedPackets.remove(expectedSeqNum);
-                            incExpectedSeqNum();
-                        }
-                    }
 
-                    packet = inPackets.poll(1000, TimeUnit.MILLISECONDS); // забираем пакет из очереди
-                    if (packet != null) {
-                        break;
+                if (inPackets.isEmpty()) {
+                    if (unexpectedPackets.containsKey(expectedSeqNum)) {
+                        addPacket(unexpectedPackets.remove(expectedSeqNum), expectedSeqNum);
+                        incExpectedSeqNum();
                     }
                 }
+
+                packet = inPackets.poll(timeout, TimeUnit.MILLISECONDS); // забираем пакет из очереди
 
                 if (packet == null) {
                     return ret;
@@ -330,13 +342,21 @@ public class MySocket {
 
                 ByteBuffer data = ByteBuffer.wrap(packet.getData());
 
-                data.getInt();
+                int seq = data.getInt();
+
+                if (seq != test + 1) {
+                    expectedSeqNum--;
+                    addUnexpectedPacket(seq, packet);
+                    continue;
+                }
+                test++;
+
                 data.getInt();
                 byte flags = data.get();
 
-                if ((flags & FIN_FLAG) == FIN_FLAG) {
+                if ((flags & FIN_FLAG) == FIN_FLAG || (flags & RST_FLAG) == RST_FLAG) {
                     setFinState();
-                    return 0;
+                    return ret;
                 }
 
                 int size = data.getInt();
@@ -349,9 +369,9 @@ public class MySocket {
                     int outSize = (ret + size) - buffer.length;
                     outData = new byte[outSize];
 
-                    System.arraycopy(tmp, size - outSize, outData, 0, outSize);
-
                     System.arraycopy(tmp, 0, buffer, ret, (buffer.length - ret));
+                    System.arraycopy(tmp, buffer.length - ret, outData, 0, outSize);
+
                     ret += (buffer.length - ret);
                 } else {
                     System.arraycopy(tmp, 0, buffer, ret, size);
@@ -365,6 +385,7 @@ public class MySocket {
         return ret;
     }
 
+    public int count = 0;
     /***
      * Отправляем
       * @param buffer - массив байт для отправки
@@ -388,18 +409,25 @@ public class MySocket {
             data.put((byte) 0);
 
             data.putInt(size);
+            count += size;
 
             byte[] tmp = new byte[size];
             System.arraycopy(buffer, i, tmp, 0, size);
             data.put(tmp);
+            //System.err.println("send: " + new String(tmp));
 
             DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
-            outPackets.put(sequenceNum, packet);
+            outPackets.add(packet);
+            againPackets.put(sequenceNum, packet);
         }
     }
 
     ArrayList<DatagramPacket> getPacketsForSend() {
-        return new ArrayList<>(outPackets.values());
+        ArrayList<DatagramPacket> ret = new ArrayList<>();
+
+        outPackets.drainTo(ret); // забираем все из очереди и кладем в лист
+
+        return ret;
     }
 
     ArrayList<DatagramPacket> getAcksForSend() {
@@ -415,11 +443,11 @@ public class MySocket {
      * @param ackNum - номер пришедшего акка
      */
     void removePacket(int ackNum) {
-        if (outPackets.containsKey(ackNum)) {
-            outPackets.remove(ackNum);
+        if (againPackets.containsKey(ackNum)) {
+            againPackets.remove(ackNum);
         }
         // если ждем завершения работы и это был последний пакет, ожидающий акка, будим close()
-        if (state == State.FIN && outPackets.isEmpty()) {
+        if (state == State.FIN && outPackets.isEmpty() && againPackets.isEmpty()) {
             synchronized (obj) {
                 obj.notify();
             }
@@ -433,6 +461,7 @@ public class MySocket {
     public boolean close() throws IOException {
         // если уже закрыты
         if (state == State.FIN) {
+            System.out.println("Socket closed");
             return true;
         }
         state = State.FIN; // переходим в состояние завершения
@@ -447,7 +476,8 @@ public class MySocket {
 
             DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
 
-            outPackets.put(sequenceNum, packet);
+            outPackets.add(packet);
+            againPackets.put(sequenceNum, packet);
 
             synchronized (obj) {
                 try {
@@ -518,7 +548,9 @@ public class MySocket {
         data.putInt(ackNum);
         data.put((byte)(ACK_FLAG | FIN_FLAG));
 
-        outPackets.put(sequenceNum, new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort));
+        DatagramPacket packet = new DatagramPacket(data.array(), data.capacity(), destinationAddress, destinationPort);
+        outPackets.add(packet);
+        againPackets.put(sequenceNum, packet);
     }
 
     boolean isClosed() {
@@ -530,6 +562,13 @@ public class MySocket {
     }
 
     void addUnexpectedPacket(int seq, DatagramPacket packet) {
+        if (unexpectedPackets.containsKey(seq)) {
+            return;
+        }
         unexpectedPackets.put(seq, packet);
+    }
+
+    public ArrayList<DatagramPacket> getPacketsWithoutAcks() {
+        return new ArrayList<>(againPackets.values());
     }
 }
